@@ -4,7 +4,11 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/v1/optimize-raster/route";
-import { measureAssociatedAlphaDistortion } from "@/lib/image/image-magick-metric";
+import {
+  measureAlphaMae,
+  measureAssociatedAlphaDistortion,
+  measureEdgeMae,
+} from "@/lib/image/image-magick-metric";
 import {
   FULL_IMAGE_CROP,
   imageMagickCropGeometry,
@@ -14,10 +18,16 @@ import {
   parseRasterResize,
   percentCropToNormalized,
 } from "./crop";
-import { encoderArgs, isRasterMode } from "./presets";
+import { encoderArgs, isRasterMode, isRasterOptimizationPolicy } from "./presets";
 import { toOptimizedFilename } from "./filename";
 import { readMagickOutputFile, runMagick, withMagickTempDirectory } from "./image-magick";
-import { AUTO_QUALITY_GATE, manualOptimizeArgs, metadataArgs, optimizeRaster } from "./optimize-raster";
+import {
+  AUTO_QUALITY_GATE,
+  autoCandidates,
+  manualOptimizeArgs,
+  metadataArgs,
+  optimizeRaster,
+} from "./optimize-raster";
 import { validateRaster } from "./validate-raster";
 
 function fixture(extension: "png" | "jpg" | "webp") {
@@ -189,6 +199,22 @@ describe("raster presets", () => {
     expect(isRasterMode(mode)).toBe(true);
   });
 
+  it("accepts only the two public optimization policies", () => {
+    expect(isRasterOptimizationPolicy("standard")).toBe(true);
+    expect(isRasterOptimizationPolicy("smaller")).toBe(true);
+    expect(isRasterOptimizationPolicy("quality=1")).toBe(false);
+  });
+
+  it("keeps aggressive encoder flags inside bounded server-owned candidate tables", () => {
+    expect(autoCandidates("png", "standard")).toHaveLength(4);
+    expect(autoCandidates("png", "smaller")).toHaveLength(10);
+    expect(autoCandidates("jpeg", "smaller")).toHaveLength(12);
+    expect(autoCandidates("webp", "smaller")).toHaveLength(12);
+    expect(autoCandidates("png", "smaller").some(({ args }) => args.includes("32"))).toBe(true);
+    expect(autoCandidates("jpeg", "smaller").some(({ args }) => args.includes("Plane"))).toBe(true);
+    expect(autoCandidates("webp", "smaller").some(({ args }) => args.includes("webp:use-sharp-yuv=true"))).toBe(true);
+  });
+
   it("keeps format-specific encoder controls centralized", () => {
     expect(encoderArgs("jpeg", "high")).toContain("92");
     expect(encoderArgs("webp", "balanced")).toContain("webp:method=5");
@@ -251,6 +277,23 @@ describe("ImageMagick raster pipeline", () => {
         directory,
       );
       expect(mae).toBeGreaterThan(AUTO_QUALITY_GATE.maximumMae);
+      expect(await measureAlphaMae(
+        "miff:transparent.miff",
+        "miff:opaque.miff",
+        directory,
+      )).toBeGreaterThan(AUTO_QUALITY_GATE.maximumAlphaMae);
+    });
+  });
+
+  it("detects moved hard edges independently of whole-image similarity", async () => {
+    await withMagickTempDirectory(async (directory) => {
+      await runMagick(["-size", "32x32", "xc:white", "-fill", "black", "-draw", "rectangle 0,0 15,31", "miff:left.miff"], {
+        temporaryDirectory: directory,
+      });
+      await runMagick(["-size", "32x32", "xc:white", "-fill", "black", "-draw", "rectangle 0,0 17,31", "miff:right.miff"], {
+        temporaryDirectory: directory,
+      });
+      expect(await measureEdgeMae("miff:left.miff", "miff:right.miff", directory)).toBeGreaterThan(0);
     });
   });
 
@@ -288,7 +331,12 @@ describe("ImageMagick raster pipeline", () => {
     expect(result.format).toBe(format);
     expect(result.width).toBe(8);
     expect(result.height).toBe(8);
-    expect(result.selection).toEqual({ mode: "balanced", preset: "balanced", candidates: 1 });
+    expect(result.selection).toEqual({
+      mode: "balanced",
+      policy: "standard",
+      preset: "balanced",
+      candidates: 1,
+    });
     expect(result.image.byteLength).toBeGreaterThan(0);
   });
 
@@ -445,9 +493,11 @@ describe("ImageMagick raster pipeline", () => {
 
     expect(result.selection.mode).toBe("auto");
     expect(result.selection.candidates).toBe(candidates);
-    expect(AUTO_QUALITY_GATE.version).toBe("imagemagick-v2");
+    expect(AUTO_QUALITY_GATE.version).toBe("imagemagick-raster-v3");
     expect(result.selection.ssim).toBeGreaterThanOrEqual(0.99);
     expect(result.selection.mae).toBeLessThanOrEqual(0.02);
+    expect(result.selection.edgeMae).toBeLessThanOrEqual(AUTO_QUALITY_GATE.maximumEdgeMae);
+    expect(result.selection.alphaMae).toBeLessThanOrEqual(AUTO_QUALITY_GATE.maximumAlphaMae);
   });
 
   it("searches WebP candidates when the calibrated gates can be met", async () => {
@@ -455,6 +505,24 @@ describe("ImageMagick raster pipeline", () => {
     const result = await optimizeRaster(generated.stdout, { crop: FULL_IMAGE_CROP, mode: "auto" });
     expect(result.selection.candidates).toBe(7);
     expect(result.selection.ssim).toBeGreaterThanOrEqual(0.99);
+  });
+
+  it.each([
+    ["png", 10],
+    ["jpg", 12],
+    ["webp", 12],
+  ] as const)("runs the bounded Smaller candidate family for %s behind the same quality gate", async (extension, candidates) => {
+    const result = await optimizeRaster(fixture(extension), {
+      crop: FULL_IMAGE_CROP,
+      mode: "auto",
+      optimization: { policy: "smaller" },
+    });
+    expect(result.selection.policy).toBe("smaller");
+    expect(result.selection.candidates).toBe(candidates);
+    expect(result.selection.ssim).toBeGreaterThanOrEqual(AUTO_QUALITY_GATE.minimumSsim);
+    expect(result.selection.mae).toBeLessThanOrEqual(AUTO_QUALITY_GATE.maximumMae);
+    expect(result.selection.edgeMae).toBeLessThanOrEqual(AUTO_QUALITY_GATE.maximumEdgeMae);
+    expect(result.selection.alphaMae).toBeLessThanOrEqual(AUTO_QUALITY_GATE.maximumAlphaMae);
   });
 
   it("does not reject transparent WebP because the encoder normalized invisible RGB", async () => {
@@ -539,7 +607,33 @@ describe("POST /api/v1/optimize-raster", () => {
     expect(response.headers.get("x-output-width")).toBe("12");
     expect(response.headers.get("x-output-height")).toBe("12");
     expect(response.headers.get("x-selected-preset")).toBe("balanced");
+    expect(response.headers.get("x-optimization-policy")).toBe("standard");
     expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+  });
+
+  it("accepts Smaller only for Auto and reports the selected policy", async () => {
+    const autoForm = new FormData();
+    autoForm.set("image", new File([fixture("png")], "sample.png", { type: "image/png" }));
+    autoForm.set("options", JSON.stringify({
+      crop: FULL_IMAGE_CROP,
+      mode: "auto",
+      optimization: { policy: "smaller" },
+    }));
+    const autoResponse = await POST(authorizedRasterRequest(autoForm));
+    expect(autoResponse.status).toBe(200);
+    expect(autoResponse.headers.get("x-optimization-policy")).toBe("smaller");
+    expect(autoResponse.headers.get("x-candidate-count")).toBe("10");
+
+    const manualForm = new FormData();
+    manualForm.set("image", new File([fixture("png")], "sample.png", { type: "image/png" }));
+    manualForm.set("options", JSON.stringify({
+      crop: FULL_IMAGE_CROP,
+      mode: "balanced",
+      optimization: { policy: "smaller" },
+    }));
+    const manualResponse = await POST(authorizedRasterRequest(manualForm));
+    expect(manualResponse.status).toBe(400);
+    expect(await manualResponse.json()).toEqual({ error: "Invalid request" });
   });
 
   it("returns concise validation errors", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import type { RasterMode } from "@/lib/raster/types";
+import type { RasterMode, RasterOptimizationPolicy } from "@/lib/raster/types";
 
 const MODES: Array<{ value: RasterMode; label: string; description: string }> = [
   { value: "high", label: "고화질", description: "세부 묘사를 더 보존" },
@@ -13,6 +13,8 @@ const MODES: Array<{ value: RasterMode; label: string; description: string }> = 
 interface RasterSettingsProps {
   mode: RasterMode;
   onMode: (mode: RasterMode) => void;
+  policy: RasterOptimizationPolicy;
+  onPolicy: (policy: RasterOptimizationPolicy) => void;
   maxWidth: string;
   maxHeight: string;
   onMaxWidth: (value: string) => void;
@@ -25,6 +27,8 @@ interface RasterSettingsProps {
 export function RasterSettings({
   mode,
   onMode,
+  policy,
+  onPolicy,
   maxWidth,
   maxHeight,
   onMaxWidth,
@@ -60,6 +64,41 @@ export function RasterSettings({
           })}
         </div>
       </fieldset>
+
+      {mode === "auto" ? (
+        <fieldset disabled={disabled}>
+          <legend className="mb-2 text-sm font-medium">자동 최적화 강도</legend>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant={policy === "standard" ? "default" : "outline"}
+              aria-pressed={policy === "standard"}
+              onClick={() => onPolicy("standard")}
+              className="h-auto min-h-14 flex-col gap-0.5 px-3 py-2"
+            >
+              <span>표준</span>
+              <span className={policy === "standard" ? "text-primary-foreground/70" : "text-muted-foreground"}>
+                안정적인 범위
+              </span>
+            </Button>
+            <Button
+              type="button"
+              variant={policy === "smaller" ? "default" : "outline"}
+              aria-pressed={policy === "smaller"}
+              onClick={() => onPolicy("smaller")}
+              className="h-auto min-h-14 flex-col gap-0.5 px-3 py-2"
+            >
+              <span>더 작게</span>
+              <span className={policy === "smaller" ? "text-primary-foreground/70" : "text-muted-foreground"}>
+                추가 손실 허용
+              </span>
+            </Button>
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            더 작게는 품질 검사를 통과하는 범위에서 PNG 색상 수를 줄이거나 JPEG·WebP 압축 후보를 확장합니다.
+          </p>
+        </fieldset>
+      ) : null}
 
       <fieldset disabled={disabled}>
         <legend className="mb-2 text-sm font-medium">자른 후 크기 조절</legend>

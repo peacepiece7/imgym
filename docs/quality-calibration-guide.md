@@ -62,6 +62,7 @@ Useful bounded variants:
 
 ```bash
 pnpm calibrate -- --pipeline raster --limit 10
+pnpm calibrate -- --pipeline raster --raster-policy both --limit 10
 pnpm calibrate -- --pipeline vector --timeout-ms 180000
 ```
 

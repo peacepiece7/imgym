@@ -3,6 +3,7 @@
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { RasterOptimizationPolicy } from "@/lib/raster/types";
 
 export interface RasterResultData {
   downloadName: string;
@@ -13,8 +14,11 @@ export interface RasterResultData {
   processingMs: number;
   preset: string;
   candidates: number;
+  policy: RasterOptimizationPolicy;
   ssim?: number;
   mae?: number;
+  edgeMae?: number;
+  alphaMae?: number;
 }
 
 function bytes(value: number) {
@@ -68,8 +72,11 @@ export function RasterResult({
         <div className="flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs text-muted-foreground">
           <span>처리 {Math.round(result.processingMs)} ms</span>
           <span>후보 {result.candidates}개</span>
+          {result.policy === "smaller" ? <span>더 작게 탐색</span> : null}
           {result.ssim !== undefined ? <span>SSIM {result.ssim.toFixed(4)}</span> : null}
           {result.mae !== undefined ? <span>MAE {result.mae.toFixed(4)}</span> : null}
+          {result.edgeMae !== undefined ? <span>윤곽 MAE {result.edgeMae.toFixed(4)}</span> : null}
+          {result.alphaMae !== undefined ? <span>투명도 MAE {result.alphaMae.toFixed(4)}</span> : null}
         </div>
       </CardContent>
     </Card>
@@ -81,8 +88,15 @@ export function rasterPresetLabel(value: string) {
   if (fixed) return fixed;
   return value
     .replace(/^PNG compression (\d+)$/, "PNG 압축 $1")
+    .replace(/^PNG lossless strategy (\d+)$/, "PNG 무손실 전략 $1")
+    .replace(/^PNG palette (\d+)$/, "PNG 색상 $1개")
     .replace(/^JPEG quality (\d+)$/, "JPEG 품질 $1")
-    .replace(/^WebP quality (\d+)$/, "WebP 품질 $1");
+    .replace(/^JPEG quality (\d+) optimized$/, "JPEG 품질 $1 최적화")
+    .replace(/^JPEG quality (\d+) progressive$/, "JPEG 품질 $1 점진 표시")
+    .replace(/^WebP quality (\d+)$/, "WebP 품질 $1")
+    .replace(/^WebP quality (\d+) sharp$/, "WebP 품질 $1 선명도 보존")
+    .replace(/^WebP quality (\d+) filtered$/, "WebP 품질 $1 필터 적용")
+    .replace(/^WebP quality (\d+) sharp filtered$/, "WebP 품질 $1 선명도·필터 적용");
 }
 
 function Metric({

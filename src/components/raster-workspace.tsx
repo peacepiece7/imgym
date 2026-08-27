@@ -15,7 +15,7 @@ import { useObjectUrl } from "@/hooks/use-object-url";
 import { authenticatedApiFetch, koreanApiError } from "@/lib/api/client";
 import type { BatchItemStatus } from "@/lib/image/batch";
 import { normalizedCropToPixels, percentCropToNormalized } from "@/lib/raster/crop";
-import type { RasterMode } from "@/lib/raster/types";
+import type { RasterMode, RasterOptimizationPolicy } from "@/lib/raster/types";
 
 const FULL_CROP: PercentCrop = { unit: "%", x: 0, y: 0, width: 100, height: 100 };
 const FULL_CROP_EPSILON = 1e-6;
@@ -65,6 +65,7 @@ export function RasterWorkspace({ apiKey, onUnauthorized }: RasterWorkspaceProps
   const itemsRef = useRef<RasterBatchItem[]>([]);
   const [activeId, setActiveId] = useState("");
   const [mode, setMode] = useState<RasterMode>("balanced");
+  const [policy, setPolicy] = useState<RasterOptimizationPolicy>("standard");
   const [maxWidth, setMaxWidth] = useState("");
   const [maxHeight, setMaxHeight] = useState("");
   const [queueError, setQueueError] = useState("");
@@ -117,6 +118,11 @@ export function RasterWorkspace({ apiKey, onUnauthorized }: RasterWorkspaceProps
 
   function changeMode(nextMode: RasterMode) {
     setMode(nextMode);
+    invalidateAllResults();
+  }
+
+  function changePolicy(nextPolicy: RasterOptimizationPolicy) {
+    setPolicy(nextPolicy);
     invalidateAllResults();
   }
 
@@ -221,6 +227,7 @@ export function RasterWorkspace({ apiKey, onUnauthorized }: RasterWorkspaceProps
 
     const runId = ++runRef.current;
     const modeSnapshot = mode;
+    const policySnapshot = policy;
     const resize = {
       ...(requestedMaxWidth !== undefined ? { maxWidth: requestedMaxWidth } : {}),
       ...(requestedMaxHeight !== undefined ? { maxHeight: requestedMaxHeight } : {}),
@@ -259,7 +266,12 @@ export function RasterWorkspace({ apiKey, onUnauthorized }: RasterWorkspaceProps
         try {
           const body = new FormData();
           body.set("image", item.file);
-          body.set("options", JSON.stringify({ crop: requestedCrop, resize, mode: modeSnapshot }));
+          body.set("options", JSON.stringify({
+            crop: requestedCrop,
+            resize,
+            mode: modeSnapshot,
+            ...(modeSnapshot === "auto" ? { optimization: { policy: policySnapshot } } : {}),
+          }));
           const response = await authenticatedApiFetch(
             "/api/v1/optimize-raster",
             apiKey,
@@ -317,8 +329,11 @@ export function RasterWorkspace({ apiKey, onUnauthorized }: RasterWorkspaceProps
             processingMs: headerNumber(response.headers, "x-processing-ms"),
             preset: response.headers.get("x-selected-preset") ?? modeSnapshot,
             candidates: headerNumber(response.headers, "x-candidate-count"),
+            policy: response.headers.get("x-optimization-policy") === "smaller" ? "smaller" : "standard",
             ...(response.headers.has("x-ssim") ? { ssim: headerNumber(response.headers, "x-ssim") } : {}),
             ...(response.headers.has("x-mae") ? { mae: headerNumber(response.headers, "x-mae") } : {}),
+            ...(response.headers.has("x-edge-mae") ? { edgeMae: headerNumber(response.headers, "x-edge-mae") } : {}),
+            ...(response.headers.has("x-alpha-mae") ? { alphaMae: headerNumber(response.headers, "x-alpha-mae") } : {}),
           };
           updateItems((current) => current.map((candidate) => candidate.id === id
             ? { ...candidate, status: "succeeded", result, output, error: undefined, requestId: undefined }
@@ -439,6 +454,8 @@ export function RasterWorkspace({ apiKey, onUnauthorized }: RasterWorkspaceProps
               <RasterSettings
                 mode={mode}
                 onMode={changeMode}
+                policy={policy}
+                onPolicy={changePolicy}
                 maxWidth={maxWidth}
                 maxHeight={maxHeight}
                 onMaxWidth={changeMaxWidth}

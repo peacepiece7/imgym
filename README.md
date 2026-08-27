@@ -123,6 +123,8 @@ Manual presets are format-specific and centralized in `src/lib/raster/presets.ts
 - **Small** prefers fewer bytes.
 - **Auto** selects the smallest candidate that passes the versioned SSIM and MAE gates.
 
+Auto also offers a shared **Standard / Smaller** policy. Standard preserves the previous bounded candidate family. Smaller opts into at most 10–12 server-owned candidates: lossless strategy and palette PNG, optimized/progressive JPEG, or sharp-YUV/filtered WebP. The browser never sends raw codec arguments. Every lossy Auto candidate must also pass edge and alpha guards, and Standard remains the fallback.
+
 Crop coordinates are normalized ratios in the browser's EXIF-corrected display space. The server always runs `auto-orient -> crop -> optional no-upscale resize -> encode` in that order. Processing uses `child_process.spawn()` with `shell: false`, fixed resource limits, bounded stdout/stderr, a 35-second per-child timeout, and an isolated temporary directory. On the Linux production target, ImageMagick and its delegates share a process group so cancellation terminates the whole tree. Raster and SVG Auto searches also have a 90-second whole-search deadline; request cancellation stops active ImageMagick work and prevents later candidates from starting.
 
 Raster limits:

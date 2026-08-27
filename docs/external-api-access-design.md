@@ -282,7 +282,9 @@ Fields:
 | Field | Type | Required | Meaning |
 |---|---|---:|---|
 | `image` | file | yes | static PNG, JPEG, or WebP |
-| `options` | JSON string | yes | the existing normalized crop, optional no-upscale resize, and `high`, `balanced`, `small`, or `auto` mode |
+| `options` | JSON string | yes | normalized crop, optional no-upscale resize, `high`, `balanced`, `small`, or `auto` mode, and optional Auto optimization policy |
+
+`options.optimization.policy` accepts `standard` or `smaller`, defaults to `standard`, and is valid only with `mode: "auto"`. The option chooses a bounded server-owned candidate family; it never accepts raw ImageMagick arguments.
 
 Example:
 
@@ -306,8 +308,11 @@ X-Output-Height
 X-Processing-Ms
 X-Selected-Preset
 X-Candidate-Count
+X-Optimization-Policy
 X-SSIM             when available
 X-MAE              when available
+X-Edge-MAE         when available
+X-Alpha-MAE        when available
 X-Request-Id
 ```
 

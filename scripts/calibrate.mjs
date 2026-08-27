@@ -21,12 +21,19 @@ const VECTOR_MODES = {
   all: ["auto", "accurate", "balanced", "tiny"],
 };
 
+const RASTER_POLICIES = {
+  standard: ["standard"],
+  smaller: ["smaller"],
+  both: ["standard", "smaller"],
+};
+
 const DEFAULT_OPTIONS = {
   baseUrl: "http://127.0.0.1:3000",
   input: "calibration/corpus",
   output: "calibration/output",
   pipeline: "both",
   modeSet: "auto",
+  rasterPolicy: "standard",
   limit: 100,
   timeoutMs: 120_000,
 };
@@ -40,6 +47,7 @@ Options:
   --output <directory>   Parent directory for timestamped runs (default: ${DEFAULT_OPTIONS.output})
   --pipeline <value>     both, raster, or vector (default: both)
   --mode-set <value>     auto or all presets (default: auto)
+  --raster-policy <value> standard, smaller, or both (default: standard)
   --limit <number>       Maximum files, 1-500 (default: ${DEFAULT_OPTIONS.limit})
   --timeout-ms <number>  Per-request timeout, 1000-300000 (default: ${DEFAULT_OPTIONS.timeoutMs})
   --help                 Show this help
@@ -83,6 +91,9 @@ export function parseArgs(argv) {
     } else if (flag === "--mode-set") {
       options.modeSet = readValue(argv, index, flag);
       index += 1;
+    } else if (flag === "--raster-policy") {
+      options.rasterPolicy = readValue(argv, index, flag);
+      index += 1;
     } else if (flag === "--limit") {
       options.limit = boundedInteger(readValue(argv, index, flag), flag, 1, 500);
       index += 1;
@@ -99,6 +110,9 @@ export function parseArgs(argv) {
   }
   if (!["auto", "all"].includes(options.modeSet)) {
     throw new Error("--mode-set must be auto or all");
+  }
+  if (!Object.hasOwn(RASTER_POLICIES, options.rasterPolicy)) {
+    throw new Error("--raster-policy must be standard, smaller, or both");
   }
   options.baseUrl = options.baseUrl.replace(/\/+$/, "");
   try {
@@ -178,13 +192,14 @@ function authenticatedHeaders(apiKey) {
   return { Authorization: `Bearer ${apiKey}` };
 }
 
-async function runRaster({ baseUrl, apiKey, timeoutMs, input, mode, outputDirectory, assetId }) {
+async function runRaster({ baseUrl, apiKey, timeoutMs, input, mode, policy, outputDirectory, assetId }) {
   const body = new FormData();
   body.append("image", new Blob([input.bytes], { type: input.mime }), basename(input.path));
   body.append("options", JSON.stringify({
     crop: { x: 0, y: 0, width: 1, height: 1 },
     resize: {},
     mode,
+    ...(mode === "auto" ? { optimization: { policy } } : {}),
   }));
 
   const response = await fetch(`${baseUrl}/api/v1/optimize-raster`, {
@@ -196,15 +211,17 @@ async function runRaster({ baseUrl, apiKey, timeoutMs, input, mode, outputDirect
   if (!response.ok) {
     const failure = await responseError(response);
     if (fatalStatus(failure.httpStatus)) throw new Error(`Raster API unavailable: ${failure.error}`);
-    return { mode, status: "error", ...failure };
+    return { mode, policy, status: "error", ...failure };
   }
 
   const output = Buffer.from(await response.arrayBuffer());
   const extension = extname(input.path).toLowerCase() === ".jpeg" ? ".jpg" : extname(input.path).toLowerCase();
-  const outputFile = `assets/${assetId}-raster-${mode}${extension}`;
+  const variant = mode === "auto" ? `${mode}-${policy}` : mode;
+  const outputFile = `assets/${assetId}-raster-${variant}${extension}`;
   await writeFile(join(outputDirectory, outputFile), output);
   return {
     mode,
+    policy,
     status: "ok",
     outputFile,
     bytes: output.byteLength,
@@ -214,11 +231,14 @@ async function runRaster({ baseUrl, apiKey, timeoutMs, input, mode, outputDirect
     selection: {
       candidate: response.headers.get("x-selected-preset"),
       candidates: numberHeader(response.headers, "x-candidate-count"),
+      policy: response.headers.get("x-optimization-policy") ?? policy,
       qualityGate: response.headers.get("x-quality-gate") ?? undefined,
       minimumSsim: numberHeader(response.headers, "x-quality-min-ssim"),
       maximumMae: numberHeader(response.headers, "x-quality-max-mae"),
       ssim: numberHeader(response.headers, "x-ssim"),
       mae: numberHeader(response.headers, "x-mae"),
+      edgeMae: numberHeader(response.headers, "x-edge-mae"),
+      alphaMae: numberHeader(response.headers, "x-alpha-mae"),
     },
   };
 }
@@ -295,17 +315,18 @@ function formatMetric(value, digits = 4) {
 }
 
 function resultCard(pipeline, result) {
+  const variant = result.policy && result.mode === "auto" ? `${result.mode}/${result.policy}` : result.mode;
   if (result.status === "error") {
-    return `<article class="card failed"><div class="preview"><span>Failed</span></div><h3>${escapeHtml(pipeline)} · ${escapeHtml(result.mode)}</h3><p>${escapeHtml(result.error)}</p></article>`;
+    return `<article class="card failed"><div class="preview"><span>Failed</span></div><h3>${escapeHtml(pipeline)} · ${escapeHtml(variant)}</h3><p>${escapeHtml(result.error)}</p></article>`;
   }
   const selection = result.selection ?? {};
   const complexity = result.stats
     ? `<span>Paths ${result.stats.paths}</span><span>Commands ${result.stats.commands}</span><span>Colors ${result.stats.colors}</span>`
     : "";
-  const quality = `<span>SSIM ${formatMetric(selection.ssim)}</span><span>MAE ${formatMetric(selection.mae)}</span>${selection.edgeMae === undefined ? "" : `<span>Edge MAE ${formatMetric(selection.edgeMae)}</span>`}`;
+  const quality = `<span>SSIM ${formatMetric(selection.ssim)}</span><span>MAE ${formatMetric(selection.mae)}</span>${selection.edgeMae === undefined ? "" : `<span>Edge MAE ${formatMetric(selection.edgeMae)}</span>`}${selection.alphaMae === undefined ? "" : `<span>Alpha MAE ${formatMetric(selection.alphaMae)}</span>`}`;
   return `<article class="card">
     <a class="preview" href="${escapeHtml(result.outputFile)}" target="_blank" rel="noreferrer"><img src="${escapeHtml(result.outputFile)}" loading="lazy" alt="${escapeHtml(`${pipeline} ${result.mode}`)} result"></a>
-    <h3>${escapeHtml(pipeline)} · ${escapeHtml(result.mode)}</h3>
+    <h3>${escapeHtml(pipeline)} · ${escapeHtml(variant)}</h3>
     <p>${escapeHtml(selection.candidate ?? result.mode)} · ${formatBytes(result.bytes)}</p>
     <div class="metrics">${quality}${complexity}</div>
   </article>`;
@@ -387,7 +408,10 @@ export async function main(argv = process.argv.slice(2)) {
     const raster = [];
     const vector = [];
     for (const mode of rasterModes) {
-      raster.push(await runRaster({ ...options, apiKey, input, mode, outputDirectory, assetId }));
+      const policies = mode === "auto" ? RASTER_POLICIES[options.rasterPolicy] : ["standard"];
+      for (const policy of policies) {
+        raster.push(await runRaster({ ...options, apiKey, input, mode, policy, outputDirectory, assetId }));
+      }
     }
     for (const mode of vectorModes) {
       vector.push(await runVector({ ...options, apiKey, input, mode, outputDirectory, assetId }));
@@ -410,6 +434,7 @@ export async function main(argv = process.argv.slice(2)) {
       baseUrl: options.baseUrl,
       pipeline: options.pipeline,
       modeSet: options.modeSet,
+      rasterPolicy: options.rasterPolicy,
       limit: options.limit,
       timeoutMs: options.timeoutMs,
     },

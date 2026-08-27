@@ -1,4 +1,9 @@
-import type { RasterFormat, RasterMode, RasterPreset } from "@/lib/raster/types";
+import type {
+  RasterFormat,
+  RasterMode,
+  RasterOptimizationPolicy,
+  RasterPreset,
+} from "@/lib/raster/types";
 
 const PRESETS: Record<RasterPreset, Record<RasterFormat, readonly string[]>> = {
   high: {
@@ -19,12 +24,17 @@ const PRESETS: Record<RasterPreset, Record<RasterFormat, readonly string[]>> = {
 };
 
 export const RASTER_MODES: readonly RasterMode[] = ["high", "balanced", "small", "auto"];
+export const RASTER_OPTIMIZATION_POLICIES: readonly RasterOptimizationPolicy[] = ["standard", "smaller"];
 
 export function isRasterMode(value: unknown): value is RasterMode {
   return typeof value === "string" && RASTER_MODES.includes(value as RasterMode);
 }
 
+export function isRasterOptimizationPolicy(value: unknown): value is RasterOptimizationPolicy {
+  return typeof value === "string"
+    && RASTER_OPTIMIZATION_POLICIES.includes(value as RasterOptimizationPolicy);
+}
+
 export function encoderArgs(format: RasterFormat, preset: RasterPreset) {
   return [...PRESETS[preset][format]];
 }
-

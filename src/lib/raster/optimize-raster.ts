@@ -1,7 +1,11 @@
 import { imageDimensionsFromData } from "image-dimensions";
 import { stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { measureAssociatedAlphaDistortion } from "@/lib/image/image-magick-metric";
+import {
+  measureAlphaMae,
+  measureAssociatedAlphaDistortion,
+  measureEdgeMae,
+} from "@/lib/image/image-magick-metric";
 import { imageMagickCropGeometry, imageMagickResizeGeometry } from "@/lib/raster/crop";
 import {
   MAGICK_LIMIT_ARGS,
@@ -14,6 +18,7 @@ import type {
   OptimizeRasterOptions,
   OptimizeRasterResult,
   RasterFormat,
+  RasterOptimizationPolicy,
   RasterPreset,
 } from "@/lib/raster/types";
 import { validateRaster } from "@/lib/raster/validate-raster";
@@ -28,10 +33,43 @@ const AUTO_OUTPUT_LIMIT_BYTES = 32 * 1024 * 1024;
 export const RASTER_AUTO_SEARCH_BUDGET_MS = 90_000;
 
 export const AUTO_QUALITY_GATE = {
-  version: "imagemagick-v2",
+  version: "imagemagick-raster-v3",
   minimumSsim: 0.99,
   maximumMae: 0.02,
+  maximumEdgeMae: 0.08,
+  maximumAlphaMae: 0.005,
 } as const;
+
+interface RasterQuality {
+  ssim: number;
+  mae: number;
+  edgeMae: number;
+  alphaMae: number;
+}
+
+function passesRasterQuality(quality: RasterQuality) {
+  return quality.ssim >= AUTO_QUALITY_GATE.minimumSsim
+    && quality.mae <= AUTO_QUALITY_GATE.maximumMae
+    && quality.edgeMae <= AUTO_QUALITY_GATE.maximumEdgeMae
+    && quality.alphaMae <= AUTO_QUALITY_GATE.maximumAlphaMae;
+}
+
+async function measureRasterQuality(
+  reference: string,
+  candidate: string,
+  temporaryDirectory: string,
+  signal?: AbortSignal,
+): Promise<RasterQuality> {
+  const ssim = 1 - await measureAssociatedAlphaDistortion(
+    reference, candidate, "SSIM", temporaryDirectory, signal,
+  );
+  const mae = await measureAssociatedAlphaDistortion(
+    reference, candidate, "MAE", temporaryDirectory, signal,
+  );
+  const edgeMae = await measureEdgeMae(reference, candidate, temporaryDirectory, signal);
+  const alphaMae = await measureAlphaMae(reference, candidate, temporaryDirectory, signal);
+  return { ssim, mae, edgeMae, alphaMae };
+}
 
 export function metadataArgs(format: RasterFormat) {
   const profileArgs = ["+profile", "!icc,*", "+set", "comment"];
@@ -82,6 +120,7 @@ function inspectOutput(image: Uint8Array, expectedFormat: RasterFormat) {
 interface AutoCandidate {
   label: string;
   args: string[];
+  lossless?: boolean;
 }
 
 async function autoCandidateBytes(path: string) {
@@ -92,20 +131,76 @@ async function autoCandidateBytes(path: string) {
   return file.size;
 }
 
-function autoCandidates(format: RasterFormat): AutoCandidate[] {
+export function autoCandidates(
+  format: RasterFormat,
+  policy: RasterOptimizationPolicy = "standard",
+): AutoCandidate[] {
   if (format === "png") {
-    return [3, 6, 7, 9].map((level) => ({
+    const standard = [3, 6, 7, 9].map((level) => ({
       label: `PNG compression ${level}`,
       args: ["-define", `png:compression-level=${level}`],
+      lossless: true,
     }));
+    if (policy === "standard") return standard;
+    return [
+      ...standard,
+      {
+        label: "PNG lossless strategy 1",
+        args: [
+          "-define", "png:compression-level=9",
+          "-define", "png:compression-strategy=1",
+          "-define", "png:compression-filter=5",
+        ],
+        lossless: true,
+      },
+      {
+        label: "PNG lossless strategy 2",
+        args: [
+          "-define", "png:compression-level=9",
+          "-define", "png:compression-strategy=2",
+          "-define", "png:compression-filter=5",
+        ],
+        lossless: true,
+      },
+      ...[256, 128, 64, 32].map((colors) => ({
+        label: `PNG palette ${colors}`,
+        args: [
+          "-colorspace", "sRGB",
+          "-dither", "None",
+          "-colors", String(colors),
+          "-define", "png:compression-level=9",
+        ],
+      })),
+    ];
   }
   if (format === "jpeg") {
-    return [92, 90, 88, 86, 82, 78, 72].map((quality) => ({
+    const standard = [92, 90, 88, 86, 82, 78, 72].map((quality) => ({
       label: `JPEG quality ${quality}`,
       args: ["-quality", String(quality), "-sampling-factor", quality >= 88 ? "4:4:4" : "4:2:0"],
     }));
+    if (policy === "standard") return standard;
+    return [
+      ...standard,
+      ...[70, 66, 62].map((quality) => ({
+        label: `JPEG quality ${quality} optimized`,
+        args: [
+          "-quality", String(quality),
+          "-sampling-factor", "4:2:0",
+          "-define", "jpeg:optimize-coding=true",
+        ],
+      })),
+      ...[82, 70].map((quality) => ({
+        label: `JPEG quality ${quality} progressive`,
+        args: [
+          "-quality", String(quality),
+          "-sampling-factor", "4:2:0",
+          "-define", "jpeg:optimize-coding=true",
+          "-interlace", "Plane",
+        ],
+      })),
+    ];
   }
-  return [90, 88, 86, 82, 78, 74, 70].map((quality) => ({
+  const standard = [90, 88, 86, 82, 78, 74, 70].map((quality) => ({
     label: `WebP quality ${quality}`,
     args: [
       "-quality", String(quality),
@@ -113,6 +208,38 @@ function autoCandidates(format: RasterFormat): AutoCandidate[] {
       "-define", "webp:alpha-quality=100",
     ],
   }));
+  if (policy === "standard") return standard;
+  return [
+    ...standard,
+    ...[68, 64, 60].map((quality) => ({
+      label: `WebP quality ${quality} sharp`,
+      args: [
+        "-quality", String(quality),
+        "-define", "webp:method=6",
+        "-define", "webp:alpha-quality=100",
+        "-define", "webp:use-sharp-yuv=true",
+      ],
+    })),
+    {
+      label: "WebP quality 74 filtered",
+      args: [
+        "-quality", "74",
+        "-define", "webp:method=6",
+        "-define", "webp:alpha-quality=100",
+        "-define", "webp:auto-filter=true",
+      ],
+    },
+    {
+      label: "WebP quality 68 sharp filtered",
+      args: [
+        "-quality", "68",
+        "-define", "webp:method=6",
+        "-define", "webp:alpha-quality=100",
+        "-define", "webp:use-sharp-yuv=true",
+        "-define", "webp:auto-filter=true",
+      ],
+    },
+  ];
 }
 
 async function autoOptimize(
@@ -134,7 +261,7 @@ async function autoOptimize(
       `miff:${reference}`,
     ], { input: image, signal: searchSignal, temporaryDirectory });
 
-    const candidates = autoCandidates(format);
+    const candidates = autoCandidates(format, options.optimization?.policy ?? "standard");
     if (format === "png") {
       const encodedCandidates: Array<{
         candidate: AutoCandidate;
@@ -178,15 +305,24 @@ async function autoOptimize(
             temporaryDirectory,
             searchSignal,
           );
-          if (mae !== 0) continue;
+          let quality: RasterQuality = { ssim: 1, mae, edgeMae: 0, alphaMae: 0 };
+          if (encodedCandidate.candidate.lossless) {
+            if (mae !== 0) continue;
+          } else {
+            quality = await measureRasterQuality(
+              `miff:${reference}`, `png:${encodedCandidate.filename}`,
+              temporaryDirectory,
+              searchSignal,
+            );
+            if (!passesRasterQuality(quality)) continue;
+          }
           const image = await readMagickOutputFile(join(temporaryDirectory, encodedCandidate.filename));
           inspectOutput(image, format);
           searchSignal.throwIfAborted();
           return {
             candidate: encodedCandidate.candidate,
             image,
-            ssim: 1,
-            mae,
+            ...quality,
             candidates: candidates.length,
           };
         } catch (error) {
@@ -205,8 +341,7 @@ async function autoOptimize(
     let selected: {
       candidate: AutoCandidate;
       image: Buffer;
-      ssim: number;
-      mae: number;
+      quality: RasterQuality;
     } | undefined;
     for (const [index, candidate] of candidates.entries()) {
       searchSignal.throwIfAborted();
@@ -224,24 +359,13 @@ async function autoOptimize(
         if (selected && bytes >= selected.image.byteLength) continue;
 
         const coderCandidate = `${CODERS[format]}:${filename}`;
-        const ssim = 1 - await measureAssociatedAlphaDistortion(
-          `miff:${reference}`,
-          coderCandidate,
-          "SSIM",
-          temporaryDirectory,
-          searchSignal,
+        const quality = await measureRasterQuality(
+          `miff:${reference}`, coderCandidate, temporaryDirectory, searchSignal,
         );
-        const mae = await measureAssociatedAlphaDistortion(
-          `miff:${reference}`,
-          coderCandidate,
-          "MAE",
-          temporaryDirectory,
-          searchSignal,
-        );
-        if (ssim < AUTO_QUALITY_GATE.minimumSsim || mae > AUTO_QUALITY_GATE.maximumMae) continue;
+        if (!passesRasterQuality(quality)) continue;
         const encoded = await readMagickOutputFile(candidatePath);
         inspectOutput(encoded, format);
-        selected = { candidate, image: encoded, ssim, mae };
+        selected = { candidate, image: encoded, quality };
       } catch (error) {
         searchSignal.throwIfAborted();
         console.warn("[optimize-raster:candidate]", { candidate: candidate.label, error });
@@ -255,7 +379,7 @@ async function autoOptimize(
       throw new Error("Auto Optimize found no acceptable result");
     }
     searchSignal.throwIfAborted();
-    return { ...selected, candidates: candidates.length };
+    return { candidate: selected.candidate, image: selected.image, ...selected.quality, candidates: candidates.length };
   });
   searchSignal.throwIfAborted();
   return result;
@@ -271,6 +395,7 @@ export async function optimizeRaster(
   if (!validation.ok) throw new Error(validation.error);
 
   const startedAt = performance.now();
+  const policy = options.optimization?.policy ?? "standard";
   if (options.mode === "auto") {
     const selected = await autoOptimize(image, validation.format, options, signal);
     const dimensions = inspectOutput(selected.image, validation.format);
@@ -281,10 +406,13 @@ export async function optimizeRaster(
       durationMs: performance.now() - startedAt,
       selection: {
         mode: "auto",
+        policy,
         preset: selected.candidate.label,
         candidates: selected.candidates,
         ssim: selected.ssim,
         mae: selected.mae,
+        edgeMae: selected.edgeMae,
+        alphaMae: selected.alphaMae,
       },
     };
   }
@@ -301,6 +429,7 @@ export async function optimizeRaster(
     durationMs: performance.now() - startedAt,
     selection: {
       mode: options.mode,
+      policy: "standard",
       preset: options.mode,
       candidates: 1,
     },

@@ -1,6 +1,6 @@
 # Raster Crop and Optimization Design
 
-Status: Raster R1 and the bounded Raster R2 search are implemented; Raster R3 aggressive same-format optimization is planned  
+Status: Raster R1/R2 and the initial opt-in Raster R3 candidate search are implemented; private-corpus calibration remains pending
 Updated: 2026-08-27  
 Scope: static PNG/JPEG/WebP crop, resize, same-format encoding, preview, reporting, quality-gated search, and the reviewed lossy-compression extension
 
@@ -588,7 +588,9 @@ If ImageMagick SSIM is unstable or its process/file choreography dominates the i
 
 SSIM remains a primary gate, not the only measurement. It can miss color shifts, sparse text damage, and small high-contrast details. Raster R2 should pair it with one inexpensive color/pixel guard and manual calibration before adding more metrics.
 
-## 13. Raster R3 — Aggressive same-format optimization plan
+## 13. Raster R3 — Aggressive same-format optimization
+
+Implementation status (2026-08-27): Auto exposes Standard and opt-in Smaller. Standard retains the prior 4-candidate PNG and 7-candidate JPEG/WebP searches. Smaller expands these to 10 PNG candidates and 12 JPEG/WebP candidates while keeping raw encoder flags server-owned. Smaller-specific lossy candidates are checked with the provisional `imagemagick-raster-v3` associated-alpha SSIM, whole-image MAE, edge MAE, and direct alpha MAE gate. The default remains Standard. Representative private-corpus calibration and contact-sheet acceptance are still required before calling the candidate grid or thresholds stable.
 
 ### 13.1 Existing optimization audit
 
@@ -596,9 +598,9 @@ Raster optimization is already implemented; R3 extends it rather than adding a s
 
 | Format | Current manual presets | Current Auto search | Missing opportunity |
 |---|---|---|---|
-| JPEG | lossy quality `92/82/72`, explicit `4:4:4` or `4:2:0` chroma sampling | seven quality candidates from 92 to 72, selected by bytes under SSIM/MAE gates | optimized entropy coding, progressive candidate, and a calibrated lower-quality range |
-| WebP | lossy quality `90/82/72`, method `4/5/6`, lossless alpha | seven quality candidates from 90 to 70 | sharper RGB-to-YUV and auto-filter candidates; lower-quality candidates after calibration |
-| PNG | true-color lossless compression level `3/7/9` | four lossless compression levels, requiring decoded MAE `0` | lossless filter/strategy search and opt-in lossy palette quantization |
+| JPEG | lossy quality `92/82/72`, explicit `4:4:4` or `4:2:0` chroma sampling | Standard has seven quality candidates; Smaller adds optimized coding, progressive output, and qualities `70/66/62` | corpus calibration and dominated-candidate removal |
+| WebP | lossy quality `90/82/72`, method `4/5/6`, lossless alpha | Standard has seven candidates; Smaller adds qualities `68/64/60`, sharp-YUV, and auto-filter anchors | corpus calibration and dominated-candidate removal |
+| PNG | true-color lossless compression level `3/7/9` | Standard has four lossless levels; Smaller adds two lossless strategy/filter anchors and no-dither palettes `256/128/64/32` | adaptive-dither benchmark and corpus calibration |
 
 Metadata removal, crop, resize, and same-format re-encoding also reduce bytes today. For most photographs, pixel dimensions and JPEG/WebP quality dominate the result. For true-color PNG logos, screenshots, and illustrations, DEFLATE effort alone usually provides only a small improvement; reducing the stored palette is the material next step.
 
@@ -693,7 +695,7 @@ Direct `cwebp` becomes relevant only if ImageMagick fails to expose a required, 
 
 Reuse the post-orient/crop/resize lossless reference from Raster R2. R3 must not compare against the uncropped upload or against a previously lossy candidate.
 
-SSIM and whole-image MAE are insufficient for palette screenshots, text, and transparency on their own. Before enabling Smaller in the UI, version a new raster gate containing:
+SSIM and whole-image MAE are insufficient for palette screenshots, text, and transparency on their own. Smaller therefore uses a newly versioned provisional raster gate containing:
 
 - associated-alpha SSIM;
 - associated-alpha MAE;
@@ -701,7 +703,7 @@ SSIM and whole-image MAE are insufficient for palette screenshots, text, and tra
 - a direct alpha error bound for formats with alpha;
 - manual light/dark/checkerboard review during offline calibration.
 
-The exact thresholds remain corpus results, not design constants. Candidate failures stay in request-scoped server logs. A failed aggressive candidate is normal search data, not a user-visible processing error.
+The checked-in thresholds are conservative starting points, not a universal quality definition. They remain subject to private-corpus results. Candidate failures stay in request-scoped server logs. A failed aggressive candidate is normal search data, not a user-visible processing error.
 
 Selection order is:
 
@@ -714,16 +716,16 @@ Selection order is:
 
 Keep the existing 90-second whole-search deadline. Start with no more than 8–12 total candidates per format and remove dominated candidates after corpus measurement. Do not increase the deadline merely to preserve every experimental combination.
 
-### 13.7 Delivery sequence
+### 13.7 Delivery and calibration status
 
-1. Extend the calibration report to record every internal raster candidate, exact encoder arguments, bytes, time, and gate results.
-2. Add and calibrate edge and alpha guards without changing production selection.
-3. Add PNG Tier A lossless candidates and remove any consistently dominated combination.
-4. Add the backward-compatible `standard | smaller` option and PNG palette candidates behind it.
-5. Add JPEG optimized/progressive and lower-quality candidates.
-6. Add WebP sharp-YUV/auto-filter and lower-quality candidates.
-7. Run the private corpus and browser contact-sheet review before exposing Smaller by default.
-8. Benchmark pngquant, MozJPEG, or direct cwebp only after the ImageMagick implementation provides a measured baseline.
+1. Pending: extend the calibration report to record every internal raster candidate, exact encoder arguments, bytes, time, and gate results.
+2. Implemented provisionally: add edge and alpha guards; calibrate their starting thresholds against the private corpus before relaxing them.
+3. Implemented: add PNG Tier A lossless candidates. Dominated-candidate removal remains pending corpus evidence.
+4. Implemented: add the backward-compatible `standard | smaller` option and PNG palette candidates behind it.
+5. Implemented: add JPEG optimized/progressive and lower-quality candidates.
+6. Implemented: add WebP sharp-YUV/auto-filter and lower-quality candidates.
+7. Pending: run the private corpus and browser contact-sheet review. Keep Standard as the default until that review passes.
+8. Deferred: benchmark pngquant, MozJPEG, or direct cwebp only after the ImageMagick implementation provides a measured baseline.
 
 Cross-format conversion to WebP or AVIF is intentionally a later feature. It can save substantially more for some sources, but it changes response MIME type, filename, download expectations, transparency behavior, Docker delegates, and API semantics. Do not mix it into same-format Raster R3.
 
@@ -768,7 +770,7 @@ The following calibration work is intentionally not claimed as complete: a repre
 
 ## 15. Verification addendum — 2026-08-24
 
-The 72-assertion result above is the preserved 2026-08-23 raster/SVG implementation record. After the API, calibration-runner, bounded multipart, child-environment isolation, document-to-PDF, associated-alpha metric, animated-vector-input, child-cancellation, process-tree cleanup, and vector-cleanup additions, the current shared repository suite contains 120 passing tests. This larger total is not a claim that the historical raster run contained 120 tests, and it does not close the deferred raster browser or corpus-calibration work recorded above.
+The 72-assertion result above is the preserved 2026-08-23 raster/SVG implementation record. After the API, calibration runner, bounded multipart, child-environment isolation, document-to-PDF, associated-alpha metric, animated-vector-input, child-cancellation, process-tree cleanup, vector cleanup, and initial Raster R3 additions, the Node 24 Docker suite contains 131 passing tests as of 2026-08-27. This larger total is not a claim that the historical raster run contained 131 tests, and it does not close the deferred raster browser or corpus-calibration work recorded above.
 
 ## 16. Primary references
 

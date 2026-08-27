@@ -178,7 +178,7 @@ The list has one active item. Selecting **보기/자르기** loads that file int
 Shared settings apply to every item:
 
 - High/Balanced/Small/Auto mode;
-- Raster R3 policy when implemented;
+- Raster R3 Standard/Smaller policy;
 - maximum width and height.
 
 Crop remains per item because applying one rectangle to images with different aspect ratios is rarely meaningful. Provide **모두 전체 이미지로 설정** as an explicit bulk action, but do not add “copy this crop to all” in R1.

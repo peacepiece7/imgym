@@ -11,7 +11,7 @@
 - [Image Vectorization: a Review (arXiv:2306.06441v1)](./papers/2306.06441-image-vectorization-review.pdf)
 - [Towards Layer-wise Image Vectorization (CVPR 2022)](./papers/ma-2022-layer-wise-image-vectorization.pdf)
 
-The paper PDFs are stored unchanged. Their design implications and the SVG roadmap are recorded in the vectorization design. The vector cleanup document specifies no-dither palette reduction, noise/alpha/gradient controls, similarity-reference semantics, and safe post-vector cleanup. The raster document records the implemented crop and bounded Raster R2 pipeline plus the reviewed Raster R3 plan for opt-in, quality-gated lossy compression. The multi-image document specifies a browser-owned sequential queue over the unchanged single-file APIs, per-file raster crops, partial success, and deferred client-side ZIP output. The external API document records the implemented mandatory single-key, per-request access boundary. The document design records the implemented semantic Markdown-to-PDF pipeline, copy contract, pagination behavior, and process isolation.
+The paper PDFs are stored unchanged. Their design implications and the SVG roadmap are recorded in the vectorization design. The vector cleanup document specifies no-dither palette reduction, noise/alpha/gradient controls, similarity-reference semantics, and safe post-vector cleanup. The raster document records the implemented crop, bounded Raster R2 pipeline, and initial opt-in Raster R3 quality-gated candidate search. The multi-image document specifies a browser-owned sequential queue over the unchanged single-file APIs, per-file raster crops, partial success, and deferred client-side ZIP output. The external API document records the implemented mandatory single-key, per-request access boundary. The document design records the implemented semantic Markdown-to-PDF pipeline, copy contract, pagination behavior, and process isolation.
 
 ## Current roadmap
 
@@ -20,7 +20,7 @@ The implemented baseline now consists of Multi-image R1, Raster R1/R2, SVG V1/V2
 1. Run corpus calibration with owner-selected photos, logos, transparent assets, illustrations, and screenshots; retain the machine report and human-reviewed contact sheet before changing any quality gate.
 2. Complete the recorded real-browser checks when a browser instance is available, including the previously deferred crop checklist, multi-image queue, and PDF upload/preview/download flow.
 3. Calibrate the implemented vector-cleanup Phase A, then add its normalized crop/cleaned preview and cleaned-reference Auto integration.
-4. Implement Raster R3 in measured increments: candidate telemetry and edge/alpha gates, PNG lossless search, opt-in palette PNG, then JPEG/WebP encoder candidates. Keep Standard behavior as the fallback.
+4. Calibrate the initial Raster R3 Standard/Smaller implementation, record internal candidate telemetry, remove dominated combinations, and retain Standard as the fallback.
 5. Add client-side ZIP for successful batch results only after individual batch downloads and memory behavior are verified.
 6. Consider SVG V3 mutations, Potrace, cross-format WebP/AVIF output, DOCX/imported document assets, or API-key issuance only when calibration or a concrete private use case justifies the added path.
 

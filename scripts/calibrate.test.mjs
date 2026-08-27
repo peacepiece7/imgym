@@ -8,12 +8,14 @@ describe("calibration runner", () => {
       "--base-url", "http://localhost:3100/",
       "--pipeline", "vector",
       "--mode-set", "all",
+      "--raster-policy", "both",
       "--limit", "12",
       "--timeout-ms", "90000",
     ])).toMatchObject({
       baseUrl: "http://localhost:3100",
       pipeline: "vector",
       modeSet: "all",
+      rasterPolicy: "both",
       limit: 12,
       timeoutMs: 90_000,
     });
@@ -24,6 +26,7 @@ describe("calibration runner", () => {
     expect(() => parseArgs(["--limit", "501"])).toThrow("--limit");
     expect(() => parseArgs(["--base-url", "file:///tmp/app"])).toThrow("--base-url");
     expect(() => parseArgs(["--base-url", "http://secret@example.com"])).toThrow("--base-url");
+    expect(() => parseArgs(["--raster-policy", "raw-flags"])).toThrow("--raster-policy");
   });
 
   it("creates stable filesystem-safe asset identifiers", () => {

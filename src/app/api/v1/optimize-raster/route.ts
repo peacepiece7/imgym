@@ -4,8 +4,12 @@ import { parseBoundedMultipartFormData } from "@/lib/api/multipart";
 import { parseNormalizedCrop, parseRasterResize } from "@/lib/raster/crop";
 import { toOptimizedFilename } from "@/lib/raster/filename";
 import { AUTO_QUALITY_GATE, optimizeRaster } from "@/lib/raster/optimize-raster";
-import { isRasterMode } from "@/lib/raster/presets";
-import type { OptimizeRasterOptions, RasterFormat } from "@/lib/raster/types";
+import { isRasterMode, isRasterOptimizationPolicy } from "@/lib/raster/presets";
+import type {
+  OptimizeRasterOptions,
+  RasterFormat,
+  RasterOptimizationPolicy,
+} from "@/lib/raster/types";
 import { RASTER_LIMITS, validateRaster } from "@/lib/raster/validate-raster";
 
 export const runtime = "nodejs";
@@ -36,7 +40,15 @@ function parseOptions(value: FormDataEntryValue | null): OptimizeRasterOptions |
   const crop = parseNormalizedCrop(raw.crop);
   const resize = parseRasterResize(raw.resize);
   if (!crop || !resize || !isRasterMode(raw.mode)) return null;
-  return { crop, resize, mode: raw.mode };
+  let policy: RasterOptimizationPolicy = "standard";
+  if (raw.optimization !== undefined) {
+    if (!raw.optimization || typeof raw.optimization !== "object") return null;
+    const optimization = raw.optimization as Record<string, unknown>;
+    if (!isRasterOptimizationPolicy(optimization.policy)) return null;
+    policy = optimization.policy;
+  }
+  if (raw.mode !== "auto" && policy !== "standard") return null;
+  return { crop, resize, mode: raw.mode, optimization: { policy } };
 }
 
 export async function POST(request: Request) {
@@ -90,6 +102,7 @@ export async function POST(request: Request) {
       inputFormat: validation.format,
       inputBytes: image.byteLength,
       mode: options.mode,
+      policy: options.optimization?.policy ?? "standard",
     };
 
     const result = await optimizeRaster(image, options, request.signal);
@@ -105,14 +118,19 @@ export async function POST(request: Request) {
       "X-Processing-Ms": result.durationMs.toFixed(1),
       "X-Selected-Preset": result.selection.preset,
       "X-Candidate-Count": String(result.selection.candidates),
+      "X-Optimization-Policy": result.selection.policy,
     });
     if (result.selection.ssim !== undefined) {
       headers.set("X-Quality-Gate", AUTO_QUALITY_GATE.version);
       headers.set("X-Quality-Min-SSIM", String(AUTO_QUALITY_GATE.minimumSsim));
       headers.set("X-Quality-Max-MAE", String(AUTO_QUALITY_GATE.maximumMae));
+      headers.set("X-Quality-Max-Edge-MAE", String(AUTO_QUALITY_GATE.maximumEdgeMae));
+      headers.set("X-Quality-Max-Alpha-MAE", String(AUTO_QUALITY_GATE.maximumAlphaMae));
       headers.set("X-SSIM", result.selection.ssim.toFixed(6));
     }
     if (result.selection.mae !== undefined) headers.set("X-MAE", result.selection.mae.toFixed(6));
+    if (result.selection.edgeMae !== undefined) headers.set("X-Edge-MAE", result.selection.edgeMae.toFixed(6));
+    if (result.selection.alphaMae !== undefined) headers.set("X-Alpha-MAE", result.selection.alphaMae.toFixed(6));
 
     return new Response(new Uint8Array(result.image), { status: 200, headers });
   } catch (error) {
