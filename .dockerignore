@@ -1,0 +1,11 @@
+.git
+.next
+node_modules
+/.venv
+coverage
+docs
+output
+tmp
+.env*
+*.log
+.DS_Store

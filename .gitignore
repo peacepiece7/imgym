@@ -1,0 +1,37 @@
+# dependencies
+/node_modules
+/.venv/
+
+# tests
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+/output/
+/tmp/
+
+# local files
+.DS_Store
+*.pem
+.env*
+.vercel
+*.tsbuildinfo
+
+# local agent tooling
+/.agents/
+/skills-lock.json
+
+# logs
+*.log
+.pnpm-debug.log*
+
+# generated calibration runs
+/calibration/output/
+
+# private calibration inputs (keep only the instructions)
+/calibration/corpus/**
+!/calibration/corpus/README.md
