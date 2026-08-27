@@ -46,10 +46,10 @@ In another shell, run an Auto-only pass first:
 pnpm calibrate -- --input calibration/corpus
 ```
 
-The default server is `http://127.0.0.1:3000`. Override it when necessary:
+The default server is `http://127.0.0.1:3000/imgym`. Override it when necessary, keeping the application base path in the URL:
 
 ```bash
-pnpm calibrate -- --base-url http://127.0.0.1:3100
+pnpm calibrate -- --base-url http://127.0.0.1:3100/imgym
 ```
 
 After the smoke pass succeeds, compare Auto with every user-facing preset:

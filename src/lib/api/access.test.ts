@@ -4,7 +4,7 @@ import { POST as docsToPdf } from "@/app/api/v1/docs-to-pdf/route";
 import { POST as optimizeRaster } from "@/app/api/v1/optimize-raster/route";
 import { POST as vectorize } from "@/app/api/v1/vectorize/route";
 import { getApiKeyConfiguration, requireApiAccess } from "./access";
-import { authenticatedApiFetch } from "./client";
+import { authenticatedApiFetch, withAppBasePath } from "./client";
 import { tryAcquireJobPermit } from "./job-gate";
 
 const TEST_API_KEY = "test-api-key-0123456789abcdefghijklmnop";
@@ -90,11 +90,19 @@ describe("single API key access", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     for (const call of fetchMock.mock.calls) {
+      expect(call[0]).toMatch(/^\/imgym\/api\/v1\//);
       const headers = new Headers(call[1]?.headers);
       expect(headers.get("authorization")).toBe(`Bearer ${TEST_API_KEY}`);
     }
     expect(() => authenticatedApiFetch("/api/v1/vectorize", "", { method: "POST" }))
       .toThrow("API 키가 필요합니다.");
+  });
+
+  it("prefixes only app-relative browser requests", () => {
+    expect(withAppBasePath("/api/health")).toBe("/imgym/api/health");
+    expect(withAppBasePath("/imgym/api/health")).toBe("/imgym/api/health");
+    expect(withAppBasePath("https://example.test/api/health"))
+      .toBe("https://example.test/api/health");
   });
 });
 

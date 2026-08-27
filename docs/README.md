@@ -1,5 +1,6 @@
 # OhMyImg Research Documents
 
+- [Manual deployment at `dev.margins.cloud/imgym`](./manual-deployment.md)
 - [Vectorization and optimization design](./image-optimization-design.md)
 - [Raster cleanup and vector path cleanup design](./vector-cleanup-design.md)
 - [Raster crop and optimization design](./raster-crop-and-optimization-design.md)

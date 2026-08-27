@@ -28,7 +28,7 @@ const RASTER_POLICIES = {
 };
 
 const DEFAULT_OPTIONS = {
-  baseUrl: "http://127.0.0.1:3000",
+  baseUrl: "http://127.0.0.1:3000/imgym",
   input: "calibration/corpus",
   output: "calibration/output",
   pipeline: "both",

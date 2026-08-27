@@ -74,7 +74,7 @@ pnpm install
 pnpm dev
 ```
 
-Open <http://localhost:3000>. The masked API-key field uses `localStorage.ohmyimgapikey` as its default, persists edits under that key, and attaches the value to each raster, vector, and document API call. This convenience is intended only for the owner's private browser profile.
+Open <http://localhost:3000/imgym>. The masked API-key field uses `localStorage.ohmyimgapikey` as its default, persists edits under that key, and attaches the value to each raster, vector, and document API call. This convenience is intended only for the owner's private browser profile.
 
 ## Commands
 
@@ -91,19 +91,19 @@ pnpm calibrate    # create raster/vector corpus reports against a running server
 
 ```sh
 docker build -t oh-my-img .
-docker run --rm --env-file .env -p 3000:3000 oh-my-img
+docker run --rm --env-file .env -p 127.0.0.1:3000:3000 oh-my-img
 ```
 
-The production image uses Node 24, Next.js standalone output, ImageMagick 7, WeasyPrint 68.1, Noto CJK fonts, and a non-root user. `.env*` is excluded from the Docker build context; the key is injected only at runtime. `/api/health` is the public container readiness check and returns 503 when the mandatory key configuration is absent or invalid.
+The production image uses Node 24, Next.js standalone output, ImageMagick 7, WeasyPrint 68.1, Noto CJK fonts, and a non-root user. `.env*` is excluded from the Docker build context; the key is injected only at runtime. `/imgym/api/health` is the public container readiness check and returns 503 when the mandatory key configuration is absent or invalid. The application is built for the fixed `/imgym` base path; see [the manual deployment guide](./docs/manual-deployment.md) for the Docker Compose and Nginx setup used by `dev.margins.cloud`.
 
 ## External API authentication
 
 The canonical conversion endpoints are:
 
 ```text
-POST /api/v1/optimize-raster
-POST /api/v1/vectorize
-POST /api/v1/docs-to-pdf
+POST /imgym/api/v1/optimize-raster
+POST /imgym/api/v1/vectorize
+POST /imgym/api/v1/docs-to-pdf
 ```
 
 Every call must include:

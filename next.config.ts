@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  basePath: "/imgym",
   output: "standalone",
   outputFileTracingIncludes: {
     "/api/v1/docs-to-pdf": ["./scripts/render-document-pdf.py"],

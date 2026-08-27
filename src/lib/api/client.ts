@@ -1,3 +1,18 @@
+export const APP_BASE_PATH = "/imgym";
+
+export function withAppBasePath(input: RequestInfo | URL): RequestInfo | URL {
+  if (
+    typeof input === "string"
+    && input.startsWith("/")
+    && input !== APP_BASE_PATH
+    && !input.startsWith(`${APP_BASE_PATH}/`)
+  ) {
+    return `${APP_BASE_PATH}${input}`;
+  }
+
+  return input;
+}
+
 export function authenticatedApiFetch(
   input: RequestInfo | URL,
   apiKey: string,
@@ -6,7 +21,7 @@ export function authenticatedApiFetch(
   if (!apiKey) throw new Error("API 키가 필요합니다.");
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${apiKey}`);
-  return fetch(input, { ...init, headers });
+  return fetch(withAppBasePath(input), { ...init, headers });
 }
 
 const API_ERROR_MESSAGES: Record<string, string> = {

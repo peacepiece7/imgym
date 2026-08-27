@@ -24,6 +24,8 @@ POST /api/v1/optimize-raster
 POST /api/v1/docs-to-pdf
 ```
 
+These are application-relative Route Handler paths. The fixed self-hosted deployment adds the Next.js base path, so external callers use `/imgym/api/v1/...` and health is exposed at `/imgym/api/health`. The reverse proxy preserves that prefix; it does not create a second set of handlers.
+
 The built-in UI uses these paths. The former unversioned `/api/vectorize` and `/api/optimize-raster` routes were removed rather than retained as unauthenticated aliases. The document workflow was introduced directly at its versioned path. There are no duplicate public adapters.
 
 `GET /api/health` is the only public API exception because the container and reverse proxy need an unauthenticated readiness/configuration check. It never returns the key or detailed runtime configuration. When the mandatory key is absent or invalid at runtime, health returns a generic 503 unhealthy result so deployment mistakes are visible.

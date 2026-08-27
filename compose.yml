@@ -1,0 +1,14 @@
+name: imgym
+
+services:
+  app:
+    build:
+      context: .
+    image: imgym:local
+    env_file:
+      - .env
+    init: true
+    ports:
+      - "127.0.0.1:5820:3000"
+    restart: unless-stopped
+    stop_grace_period: 15s
