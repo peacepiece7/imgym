@@ -4,6 +4,15 @@ import type {
   WebAssetOutput,
 } from "@/lib/web-assets/types";
 
+/**
+ * Only the shape a snippet reads, so the client can render the same code from a
+ * planned pack it has not generated yet.
+ */
+export type SnippetOutput = Pick<
+  WebAssetOutput,
+  "path" | "purpose" | "format" | "width" | "height" | "scale"
+>;
+
 function htmlAttribute(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -12,19 +21,19 @@ function htmlAttribute(value: string) {
     .replaceAll(">", "&gt;");
 }
 
-function srcset(outputs: readonly WebAssetOutput[]) {
+function srcset(outputs: readonly SnippetOutput[]) {
   return [...outputs]
     .sort((left, right) => left.width - right.width)
     .map((output) => `${output.path} ${output.width}w`)
     .join(", ");
 }
 
-function largest(outputs: readonly WebAssetOutput[]) {
+function largest(outputs: readonly SnippetOutput[]) {
   return [...outputs].sort((left, right) => right.width - left.width)[0];
 }
 
 export function htmlPictureSnippet(
-  outputs: readonly WebAssetOutput[],
+  outputs: readonly SnippetOutput[],
   options: WebAssetOptions,
 ) {
   const fallback = outputs.filter((output) => output.purpose === "fallback");
@@ -53,7 +62,7 @@ export function htmlPictureSnippet(
 }
 
 export function nextImageSnippet(
-  output: WebAssetOutput,
+  output: SnippetOutput,
   options: WebAssetOptions,
   placeholder?: string,
 ) {
@@ -81,7 +90,7 @@ export function nextImageSnippet(
 
 export function designHandoffSnippet(
   facts: AssetFacts,
-  outputs: readonly WebAssetOutput[],
+  outputs: readonly SnippetOutput[],
   options: WebAssetOptions,
 ) {
   return `${JSON.stringify({
