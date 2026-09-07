@@ -76,10 +76,52 @@ export function metadataArgs(format: RasterFormat) {
   if (format === "png") {
     return [
       ...profileArgs,
-      "-define", "png:exclude-chunk=EXIF,iTXt,tEXt,zTXt,date",
+      "-define", "png:exclude-chunk=EXIF,iTXt,tEXt,date",
     ];
   }
   return profileArgs;
+}
+
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const PRIVATE_PNG_CHUNKS = new Set(["eXIf", "iTXt", "tEXt", "zTXt", "tIME"]);
+
+function parsePngChunks(image: Buffer) {
+  if (image.byteLength < PNG_SIGNATURE.byteLength || !image.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    throw new Error("ImageMagick returned an invalid PNG output");
+  }
+  const chunks: Array<{ type: string; data: Buffer }> = [];
+  let offset = 8;
+  while (offset + 12 <= image.byteLength) {
+    const length = image.readUInt32BE(offset);
+    const end = offset + 12 + length;
+    if (end > image.byteLength) break;
+    const type = image.toString("ascii", offset + 4, offset + 8);
+    chunks.push({ type, data: image.subarray(offset, end) });
+    offset = end;
+    if (type === "IEND") break;
+  }
+  if (chunks.at(-1)?.type !== "IEND" || offset !== image.byteLength) {
+    throw new Error("ImageMagick returned an invalid PNG output");
+  }
+  return chunks;
+}
+
+export function stripPngPrivateChunks(image: Buffer, colorSource: Buffer = image) {
+  const sourceCicp = parsePngChunks(colorSource).find(({ type }) => type === "cICP")?.data;
+  const parsed = parsePngChunks(image);
+  const needsCicp = sourceCicp !== undefined && !parsed.some(({ type }) => type === "cICP");
+  const chunks: Buffer[] = [image.subarray(0, 8)];
+  let changed = needsCicp;
+  let insertedCicp = false;
+  for (const chunk of parsed) {
+    if (needsCicp && !insertedCicp && (chunk.type === "PLTE" || chunk.type === "IDAT")) {
+      chunks.push(sourceCicp);
+      insertedCicp = true;
+    }
+    if (PRIVATE_PNG_CHUNKS.has(chunk.type)) changed = true;
+    else chunks.push(chunk.data);
+  }
+  return changed ? Buffer.concat(chunks) : image;
 }
 
 function transformArgs(format: RasterFormat, options: OptimizeRasterOptions) {
@@ -316,12 +358,15 @@ async function autoOptimize(
             );
             if (!passesRasterQuality(quality)) continue;
           }
-          const image = await readMagickOutputFile(join(temporaryDirectory, encodedCandidate.filename));
-          inspectOutput(image, format);
+          const outputImage = stripPngPrivateChunks(
+            await readMagickOutputFile(join(temporaryDirectory, encodedCandidate.filename)),
+            image,
+          );
+          inspectOutput(outputImage, format);
           searchSignal.throwIfAborted();
           return {
             candidate: encodedCandidate.candidate,
-            image,
+            image: outputImage,
             ...quality,
             candidates: candidates.length,
           };
@@ -421,9 +466,10 @@ export async function optimizeRaster(
     input: image,
     signal,
   });
-  const dimensions = inspectOutput(result.stdout, validation.format);
+  const outputImage = validation.format === "png" ? stripPngPrivateChunks(result.stdout, image) : result.stdout;
+  const dimensions = inspectOutput(outputImage, validation.format);
   return {
-    image: result.stdout,
+    image: outputImage,
     format: validation.format,
     ...dimensions,
     durationMs: performance.now() - startedAt,

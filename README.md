@@ -1,159 +1,95 @@
 # Oh My Img!
 
-A small, self-hosted conversion tool with three independent workflows:
+개인 운영용 이미지·에셋 변환 도구입니다. 이미지 검사와 웹 배포 패키지 생성부터 래스터 최적화, SVG 변환, 에셋 레시피, Markdown PDF 생성까지 한 화면에서 처리합니다.
 
-- crop, resize, and same-format optimize static PNG, JPEG, and WebP images;
-- vectorize PNG, JPEG, and WebP images with no-dither raster cleanup, VTracer, and SVGO;
-- convert semantic UTF-8 Markdown into tagged, selectable PDF/UA documents.
+- 운영 주소: <https://dev.margins.cloud/imgym>
+- 기술 문서 시작점: [프로젝트 위키](./docs/wiki/home.md)
+- 배포 절차: [수동 배포 가이드](./docs/manual-deployment.md)
 
-The image workflows accept up to ten files (50 MiB total in the browser) and process them sequentially through the existing one-file requests. Raster crops are stored per file, results may succeed or fail independently, and no upload or output is permanently stored.
+## 제공 기능
 
-Every conversion request requires the single owner API key configured in `OHMYIMG_API_KEY`. The key is verified independently on every request; there is no login session or key-issuance endpoint.
+| 작업 공간 | 주요 기능 |
+| --- | --- |
+| 웹 에셋 팩 | 이미지 사전 검사, 반응형 HTML/Next.js/디자인 산출물, WebP·AVIF, LQIP, manifest, 스트리밍 ZIP |
+| 에셋 레시피 | 비율별 크롭, 아이콘, 팔레트·WCAG, OG 이미지, HEIC 변환, 배경 제거, 워터마크, GIF 영상화, WOFF2 서브셋, 직접 SVG 최적화 |
+| 래스터 최적화 | PNG·JPEG·WebP 크롭, 리사이즈, 동일 포맷 최적화, 품질 게이트 기반 Auto 모드 |
+| SVG 만들기 | 래스터 벡터화, 전처리, SVGO, 품질 게이트 기반 Auto 모드 |
+| 문서를 PDF로 | UTF-8 Markdown을 선택 가능한 태그 PDF/UA-1 문서로 변환 |
 
-## Pipelines
+업로드와 결과는 영구 저장하지 않습니다. 변환 중 필요한 파일만 요청별 임시 디렉터리에 만들고 완료·취소 시 제거합니다.
 
-```text
-Raster R1
-upload -> validate -> EXIF auto-orient -> crop -> fit resize -> encode -> preview/download
+## 빠른 시작
 
-Raster R2 Auto
-R1 transforms -> fixed encoder candidates -> decode -> SSIM + MAE gates -> smallest passing image
+요구 버전은 Node.js 24와 pnpm 10.7.1입니다. 전체 기능에는 ImageMagick, FFmpeg, FontTools/Brotli, librsvg, WeasyPrint 68.1과 Noto CJK가 필요하고 PDF 통합 검증에는 Poppler가 필요하므로 Docker가 기준 실행 환경입니다.
 
-SVG V1
-upload -> validate -> VTracer -> conservative SVGO -> analyze -> preview/download
-
-SVG V2 Auto
-upload -> 6 VTracer/SVGO candidates -> librsvg rasterize -> SSIM + MAE + edge-MAE gates -> smallest passing SVG
-
-Document PDF V1
-Markdown -> semantic HTML -> paged-media layout -> WeasyPrint PDF/UA-1 -> preview/download
-```
-
-Raster output keeps the input format. Animated PNG and WebP are intentionally rejected by both raster and vector workflows. Auto mode searches only four PNG or seven JPEG/WebP candidates; it returns no result when even the High baseline fails the quality gates.
-
-## Requirements
-
-- Node.js 24 LTS
-- pnpm 10.7.1
-- ImageMagick 7 with PNG, JPEG, and WebP read/write support
-- `rsvg-convert` (librsvg) for SVG V2 similarity rendering
-- Python 3, WeasyPrint 68.1, and a Korean-capable Noto CJK font for document PDF output
-- Poppler (`pdfinfo`, `pdffonts`, and `pdftotext`) for the document integration tests
-
-On macOS with Homebrew:
-
-```sh
-brew install imagemagick librsvg poppler
-python3 -m venv .venv
-.venv/bin/pip install weasyprint==68.1
-magick -version
-magick -list format | grep -E '^\s+(JPEG|PNG|WEBP)'
-rsvg-convert --version
-```
-
-The document renderer automatically prefers `.venv/bin/python3` (or `.venv\\Scripts\\python.exe` on Windows) so its pinned WeasyPrint installation does not depend on whichever Python happens to appear first on `PATH`. Set `DOCUMENT_PDF_PYTHON_BINARY` to an absolute interpreter path only when a different managed environment is intentional.
-
-ImageMagick is needed for raster optimization and SVG quality measurement. The Docker builder and runtime install the Alpine JPEG/WebP modules and `rsvg-convert` explicitly so the canonical build runs both raster and SVG Auto regressions before producing the final image.
-
-## Run locally
-
-Generate one key and save it in the ignored root `.env` file:
+1. 32자 이상의 API 키를 생성합니다.
 
 ```sh
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
 ```
 
+2. 저장소 루트의 무시된 `.env`에 키를 기록합니다.
+
 ```dotenv
-OHMYIMG_API_KEY=replace-with-the-generated-value
+OHMYIMG_API_KEY=생성한-키
 ```
 
-Then start the application:
+3. 개발 서버를 실행합니다.
 
 ```sh
 pnpm install
 pnpm dev
 ```
 
-Open <http://localhost:3000/imgym>. The masked API-key field uses `localStorage.ohmyimgapikey` as its default, persists edits under that key, and attaches the value to each raster, vector, and document API call. This convenience is intended only for the owner's private browser profile.
+브라우저에서 <http://localhost:3000/imgym>을 엽니다. UI에 입력한 키는 개인 브라우저의 `localStorage.ohmyimgapikey`에 저장되고 매 API 요청의 Bearer 인증값으로 전송됩니다.
 
-## Commands
-
-```sh
-pnpm dev          # development server
-pnpm lint         # ESLint
-pnpm test         # unit, process-integration, and route tests
-pnpm build        # production build
-pnpm start        # production server after a build
-pnpm calibrate    # create raster/vector corpus reports against a running server
-```
-
-## Docker
+## 자주 쓰는 명령
 
 ```sh
-docker build -t oh-my-img .
-docker run --rm --env-file .env -p 127.0.0.1:3000:3000 oh-my-img
+pnpm dev                         # 개발 서버
+pnpm lint                        # ESLint
+pnpm test                        # 단위·프로세스·라우트 테스트
+pnpm build                       # Next.js 프로덕션 빌드
+pnpm audit:assets -- public      # 에셋 예산·메타데이터·중복 감사
+pnpm calibrate                   # 실행 중인 서버를 대상으로 품질 보정 보고서 생성
+
+docker build -t oh-my-img .      # 테스트와 빌드를 포함한 기준 이미지 생성
+docker compose up -d --build     # 운영 형태로 로컬 기동
 ```
 
-The production image uses Node 24, Next.js standalone output, ImageMagick 7, WeasyPrint 68.1, Noto CJK fonts, and a non-root user. `.env*` is excluded from the Docker build context; the key is injected only at runtime. `/imgym/api/health` is the public container readiness check and returns 503 when the mandatory key configuration is absent or invalid. The application is built for the fixed `/imgym` base path; see [the manual deployment guide](./docs/manual-deployment.md) for the Docker Compose and Nginx setup used by `dev.margins.cloud`.
+## API와 보안 경계
 
-## External API authentication
-
-The canonical conversion endpoints are:
-
-```text
-POST /imgym/api/v1/optimize-raster
-POST /imgym/api/v1/vectorize
-POST /imgym/api/v1/docs-to-pdf
-```
-
-Every call must include:
+모든 변환 API는 다음 헤더를 요구합니다.
 
 ```http
 Authorization: Bearer <OHMYIMG_API_KEY>
 ```
 
-Missing or incorrect request credentials return 401 before multipart parsing. Missing or invalid server configuration returns 503. The previous unversioned conversion paths were removed. See [the external API access design](./docs/external-api-access-design.md) for the multipart contracts and `curl` examples.
+공개 헬스 체크는 `GET /imgym/api/health`입니다. 주요 변환 경로는 다음과 같습니다.
 
-## Raster behavior
+```text
+POST /imgym/api/v1/inspect-assets
+POST /imgym/api/v1/web-assets
+POST /imgym/api/v1/web-assets/preview
+POST /imgym/api/v1/asset-recipes
+POST /imgym/api/v1/asset-recipes/preview
+POST /imgym/api/v1/media-recipes
+POST /imgym/api/v1/optimize-raster
+POST /imgym/api/v1/vectorize
+POST /imgym/api/v1/optimize-svg
+POST /imgym/api/v1/docs-to-pdf
+```
 
-Manual presets are format-specific and centralized in `src/lib/raster/presets.ts`:
+인증은 multipart 파싱 전에 수행합니다. 서버 키 설정이 없거나 잘못되면 503, 요청 키가 없거나 틀리면 401, 처리 슬롯이 가득 차면 429를 반환합니다. 기본 동시 작업 수는 프로세스당 1개이며 `OHMYIMG_MAX_CONCURRENT_JOBS`로 최대 4개까지 설정할 수 있습니다.
 
-- **High** preserves more encoded detail.
-- **Balanced** is the default quality/size trade-off.
-- **Small** prefers fewer bytes.
-- **Auto** selects the smallest candidate that passes the versioned SSIM and MAE gates.
+## 프로젝트를 다시 이해할 때
 
-Auto also offers a shared **Standard / Smaller** policy. Standard preserves the previous bounded candidate family. Smaller opts into at most 10–12 server-owned candidates: lossless strategy and palette PNG, optimized/progressive JPEG, or sharp-YUV/filtered WebP. The browser never sends raw codec arguments. Every lossy Auto candidate must also pass edge and alpha guards, and Standard remains the fallback.
+다음 순서로 읽으면 현재 구조를 빠르게 복원할 수 있습니다.
 
-Crop coordinates are normalized ratios in the browser's EXIF-corrected display space. The server always runs `auto-orient -> crop -> optional no-upscale resize -> encode` in that order. Processing uses `child_process.spawn()` with `shell: false`, fixed resource limits, bounded stdout/stderr, a 35-second per-child timeout, and an isolated temporary directory. On the Linux production target, ImageMagick and its delegates share a process group so cancellation terminates the whole tree. Raster and SVG Auto searches also have a 90-second whole-search deadline; request cancellation stops active ImageMagick work and prevents later candidates from starting.
+1. [위키 홈](./docs/wiki/home.md) — 문서 지도와 현재 상태
+2. [프로젝트 구조](./docs/wiki/project-shape.md) — 런타임, 코드 계층, 신뢰 경계
+3. [작업 흐름과 API](./docs/wiki/workflows-and-api.md) — 기능별 파이프라인과 제한
+4. [운영 가이드](./docs/wiki/operations.md) — 로컬 실행, 배포, 점검, 복구
+5. [유지보수 가이드](./docs/wiki/maintenance.md) — 변경 위치, 불변 조건, 완료 기준
 
-Raster limits:
-
-- 10 MiB encoded upload
-- 8,192 px maximum width or height
-- 25 megapixels decoded area
-- 32 MiB output cap
-- static PNG, JPEG, and WebP only
-
-Expected validation errors are short. Internal ImageMagick failures return only `Image processing failed.` and a request ID; full bounded diagnostics remain in server logs.
-
-## SVG behavior
-
-- **Accurate** keeps more colors and coordinate precision.
-- **Balanced** is the default quality/size trade-off.
-- **Tiny** reduces colors and curve detail more aggressively.
-- **Auto** evaluates six bounded VTracer/SVGO configurations and selects the smallest result that passes the versioned SSIM, pixel-MAE, edge-MAE, and complexity gates.
-
-The report keeps visual similarity, serialized SVG size, and SVG complexity as separate concerns. Manual SVG presets add Cleanup and Colors controls before tracing; Advanced exposes bounded speckle, alpha, gradient, color-precision, and curve-simplification values. Palette reduction disables dithering so it does not manufacture tiny vector regions. SVG Auto currently retains its original-raster quality reference and therefore leaves cleanup disabled until cleaned-reference search is implemented. Its thresholds are starting values pending corpus calibration, not a universal quality claim.
-
-## Document PDF behavior
-
-Docs to PDF accepts pasted Markdown or UTF-8 `.md`, `.markdown`, and `.txt` files. GFM headings, paragraphs, lists, tables, links, quotes, and code become real semantic HTML elements before WeasyPrint creates PDF/UA-1 output. The UI supports A4/Letter, portrait/landscape, document/resume templates, page numbers, browser preview, and download.
-
-The fixed print stylesheet keeps headings with their first following block, applies three-line widow/orphan protection to paragraphs, moves short list items and table rows as units, and repeats table headers. Source DOM order is the PDF reading order. Raw HTML, user CSS, JavaScript, remote images, arbitrary files, and DOCX are not accepted in V1. The Python renderer is spawned without a shell, cannot fetch external resources, receives no API key, and returns only bounded PDF bytes.
-
-## Design and research
-
-See [the vectorization design](./docs/image-optimization-design.md) for the tracer comparison, paper findings, SVG V2 bounded search, and SVG V3 simplification research. See [the vector cleanup design](./docs/vector-cleanup-design.md) for preprocessing controls, option ownership, and the cleaned-reference Auto roadmap. See [the raster design and implementation record](./docs/raster-crop-and-optimization-design.md) for crop semantics, ImageMagick process safety, encoder presets, verification, and Raster R2/R3 quality gates. See [the multi-image upload design](./docs/multi-image-upload-design.md) for the sequential browser queue, per-file raster crops, partial success, limits, and download plan. See [the document-to-PDF design](./docs/document-to-pdf-design.md) for the copy contract, PDF/UA structure, pagination rules, security boundary, and verification plan.
-
-The latest correctness and verification findings are recorded in [the implementation review](./docs/implementation-review-2026-08-23.md). Mandatory per-request owner-key protection and versioned external conversion endpoints are specified and recorded in [the external API access design](./docs/external-api-access-design.md).
+상세한 연구·설계·검토 기록은 [문서 색인](./docs/README.md)에 보존합니다. 위키는 현재 동작을 설명하고, 날짜가 붙은 검토 문서는 당시의 증거와 의사결정을 설명합니다.

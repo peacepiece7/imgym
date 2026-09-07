@@ -11,9 +11,13 @@ RUN pnpm install --frozen-lockfile
 FROM base AS builder
 WORKDIR /app
 RUN apk add --no-cache \
+    colord \
+    ffmpeg \
     font-noto-cjk \
-    imagemagick imagemagick-jpeg imagemagick-webp \
+    imagemagick imagemagick-heic imagemagick-jpeg imagemagick-webp \
+    libheif-aom \
     poppler-utils \
+    py3-brotli py3-fonttools \
     rsvg-convert \
     weasyprint=68.1-r1
 COPY --from=dependencies /app/node_modules ./node_modules
@@ -27,8 +31,12 @@ ENV HOSTNAME="0.0.0.0"
 ENV PORT=3000
 
 RUN apk add --no-cache \
+    colord \
+    ffmpeg \
     font-noto-cjk \
-    imagemagick imagemagick-jpeg imagemagick-webp \
+    imagemagick imagemagick-heic imagemagick-jpeg imagemagick-webp \
+    libheif-aom \
+    py3-brotli py3-fonttools \
     rsvg-convert \
     weasyprint=68.1-r1 \
   && addgroup --system --gid 1001 nodejs \

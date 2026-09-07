@@ -12,6 +12,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "audit:assets": "node scripts/audit-assets.mjs",
     "calibrate": "node --env-file=.env scripts/calibrate.mjs"
   },
   "dependencies": {

@@ -1,18 +1,22 @@
 "use client";
 
-import { Code2, Crop, FileText, KeyRound, WandSparkles } from "lucide-react";
+import { Code2, Crop, FileArchive, FileText, KeyRound, PackageOpen, WandSparkles } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useRef, useState } from "react";
 import { DocumentWorkspace } from "@/components/document-workspace";
 import { RasterWorkspace } from "@/components/raster-workspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { VectorWorkspace } from "@/components/vector-workspace";
+import { WebAssetWorkspace } from "@/components/web-asset-workspace";
 import { setLocalApiKey, useLocalApiKey } from "@/hooks/use-local-api-key";
 
-type Tool = "raster" | "vector" | "document";
+type Tool = "web-assets" | "recipes" | "raster" | "vector" | "document";
+
+const AssetRecipeWorkspace = dynamic(() => import("@/components/asset-recipe-workspace").then((module) => module.AssetRecipeWorkspace));
 
 export function ImageWorkspace() {
-  const [tool, setTool] = useState<Tool>("raster");
+  const [tool, setTool] = useState<Tool>("web-assets");
   const apiKey = useLocalApiKey();
   const apiKeyInputRef = useRef<HTMLInputElement>(null);
 
@@ -32,7 +36,7 @@ export function ImageWorkspace() {
           </div>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Oh My Img!</h1>
           <p className="mt-2 max-w-xl text-base text-muted-foreground sm:text-lg">
-            이미지를 최적화하고 SVG를 만들거나 Markdown 문서를 PDF로 변환합니다.
+            이미지를 검사해 웹 에셋 팩으로 전달하고, 래스터·SVG·PDF 변환도 처리합니다.
           </p>
         </div>
         <div className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
@@ -74,6 +78,24 @@ export function ImageWorkspace() {
       <nav className="mb-6 flex flex-wrap gap-2" aria-label="변환 도구">
         <Button
           type="button"
+          variant={tool === "recipes" ? "default" : "outline"}
+          aria-pressed={tool === "recipes"}
+          onClick={() => setTool("recipes")}
+        >
+          <PackageOpen aria-hidden="true" />
+          에셋 레시피
+        </Button>
+        <Button
+          type="button"
+          variant={tool === "web-assets" ? "default" : "outline"}
+          aria-pressed={tool === "web-assets"}
+          onClick={() => setTool("web-assets")}
+        >
+          <FileArchive aria-hidden="true" />
+          웹 에셋 팩
+        </Button>
+        <Button
+          type="button"
           variant={tool === "raster" ? "default" : "outline"}
           aria-pressed={tool === "raster"}
           onClick={() => setTool("raster")}
@@ -101,7 +123,11 @@ export function ImageWorkspace() {
         </Button>
       </nav>
 
-      {tool === "raster" ? (
+      {tool === "web-assets" ? (
+        <WebAssetWorkspace apiKey={apiKey} onUnauthorized={focusApiKey} />
+      ) : tool === "recipes" ? (
+        <AssetRecipeWorkspace apiKey={apiKey} onUnauthorized={focusApiKey} />
+      ) : tool === "raster" ? (
         <RasterWorkspace apiKey={apiKey} onUnauthorized={focusApiKey} />
       ) : tool === "vector" ? (
         <VectorWorkspace apiKey={apiKey} onUnauthorized={focusApiKey} />

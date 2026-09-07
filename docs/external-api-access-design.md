@@ -1,7 +1,7 @@
 # External API Access Design
 
-Status: implemented; server-side verification complete; formal browser pass deferred  
-Reviewed: 2026-08-24
+Status: implemented; server-side verified; new recipe browser pass pending
+Reviewed: 2026-09-06
 
 ## 1. Decision
 
@@ -22,6 +22,13 @@ The canonical conversion routes will be:
 POST /api/v1/vectorize
 POST /api/v1/optimize-raster
 POST /api/v1/docs-to-pdf
+POST /api/v1/inspect-assets
+POST /api/v1/web-assets
+POST /api/v1/web-assets/preview
+POST /api/v1/optimize-svg
+POST /api/v1/asset-recipes
+POST /api/v1/asset-recipes/preview
+POST /api/v1/media-recipes
 ```
 
 These are application-relative Route Handler paths. The fixed self-hosted deployment adds the Next.js base path, so external callers use `/imgym/api/v1/...` and health is exposed at `/imgym/api/health`. The reverse proxy preserves that prefix; it does not create a second set of handlers.
@@ -39,6 +46,13 @@ The complete access matrix is:
 | `POST /api/v1/vectorize` | required on every call | 401 before body parsing when missing or wrong |
 | `POST /api/v1/optimize-raster` | required on every call | 401 before body parsing when missing or wrong |
 | `POST /api/v1/docs-to-pdf` | required on every call | 401 before body parsing when missing or wrong |
+| `POST /api/v1/inspect-assets` | required on every call | 401 before body parsing; returns bounded preflight facts |
+| `POST /api/v1/web-assets` | required on every call | 401 before body parsing; streams a bounded ZIP archive |
+| `POST /api/v1/web-assets/preview` | required on every call | 401 before body parsing; returns one representative output |
+| `POST /api/v1/optimize-svg` | required on every call | 401 before body parsing; returns a hardened direct SVG result |
+| `POST /api/v1/asset-recipes` | required on every call | 401 before body parsing; streams one bounded image-recipe ZIP |
+| `POST /api/v1/asset-recipes/preview` | required on every call | 401 before body parsing; returns one representative recipe image |
+| `POST /api/v1/media-recipes` | required on every call | 401 before body parsing; streams one bounded GIF or font ZIP |
 | old unversioned conversion paths | not accepted | removed; normal 404 behavior |
 | any future conversion or mutation API | required by default | a public exception requires an explicit design decision |
 
@@ -51,7 +65,7 @@ V1 includes:
 - exactly one required server-configured key;
 - Bearer authentication;
 - per-request verification with no authenticated session;
-- the raster, SVG, and Markdown-to-PDF operations;
+- the raster, SVG, Markdown-to-PDF, Web Asset Pack, image-recipe, and bounded media-recipe operations;
 - stable `/api/v1` paths;
 - generic client errors and detailed bounded server logs;
 - request admission control for CPU- and memory-intensive jobs;
@@ -70,7 +84,7 @@ V1 deliberately excludes:
 - cross-origin browser clients and permissive CORS;
 - distributed rate limiting across multiple replicas.
 
-One valid key grants access to all three protected operations and every preset or document option. This is authentication with a single all-or-nothing authorization policy, not a user-management system. API-key issuance is explicitly deferred until there is a real need for multiple independently managed clients.
+One valid key grants access to all protected operations and every preset or document option. This is authentication with a single all-or-nothing authorization policy, not a user-management system. API-key issuance is explicitly deferred until there is a real need for multiple independently managed clients.
 
 ## 3. Why Bearer authentication
 
@@ -211,7 +225,7 @@ X-Request-Id: <request-id>
 
 Missing and incorrect request keys return the same status and body. Do not disclose whether the key was absent, had the right prefix, had the right length, or nearly matched. A missing server configuration is a distinct 503 operational failure, but its response still contains no configuration detail. Validation and conversion errors retain their existing concise messages. Unexpected pipeline failures remain `Image processing failed.`, `Conversion failed.`, or `Document conversion failed.` with a request ID; raw tool output and stack traces stay in server logs.
 
-The successful authentication result is not a session. Every later raster, vector, or document request must send the header again and is verified again.
+The successful authentication result is not a session. Every later raster, vector, document, inspection, pack, or preview request must send the header again and is verified again.
 
 Per-request invariants:
 
@@ -224,7 +238,7 @@ Per-request invariants:
 
 ## 6. API contract
 
-All three operations use `multipart/form-data`. Image operations carry a bounded binary image, while the document operation carries exactly one bounded Markdown file or string. Do not add base64-in-JSON image or PDF payloads; they increase payload size and memory use without improving the client contract.
+All protected operations use `multipart/form-data`. Image operations carry bounded binary images, while the document operation carries exactly one bounded Markdown file or string. Do not add base64-in-JSON image or PDF payloads; they increase payload size and memory use without improving the client contract.
 
 ### 6.1 Vectorization
 
@@ -369,7 +383,44 @@ X-Request-Id
 
 Do not wrap the PDF in JSON or base64. The detailed semantic, pagination, renderer, and resource limits are specified in [Document to PDF Design](./document-to-pdf-design.md).
 
-### 6.4 Common status codes
+### 6.4 Asset inspection
+
+`POST /api/v1/inspect-assets` accepts repeated `images` fields containing 1–10 static PNG, JPEG, or WebP files. Each file is at most 10 MiB and the complete request is at most 50 MiB. The JSON response reports signature-derived MIME, dimensions, pixels, aspect ratio, alpha, animation, orientation, ICC/CICP presence, sensitive metadata presence, and a bounded content hint. It never returns metadata values such as GPS coordinates.
+
+### 6.5 Web Asset Pack
+
+`POST /api/v1/web-assets` accepts the same repeated `images` fields plus one strict JSON `options` field. Profiles are `html`, `next`, and `design`. A successful response streams `application/zip` containing quality-gated files, target-specific code, and deterministic `manifest.json`; file failures are recorded without discarding other successful assets. Archive entry count and total uncompressed bytes are bounded, paths are server-generated, and temporary work is removed when the stream completes or is cancelled.
+
+The default `preserve` color policy treats ICC and CICP as independent signals. A candidate must retain every signal present in the source; a modern-format candidate that cannot prove equivalent CICP signaling is pruned with `color-profile`. Only the explicit `srgb` policy converts the source for web-safe output. PNG privacy cleanup removes EXIF and textual/time chunks after encoding without removing ICC or CICP.
+
+### 6.6 Representative output preview
+
+`POST /api/v1/web-assets/preview` accepts exactly one `images` file plus the same JSON `options`. It returns one representative encoded image and exposes dimensions, selected format, byte count, and quality metrics through bounded response headers. The UI uses this endpoint for output inspection and individual download before creating a full pack.
+
+### 6.7 Direct SVG optimization
+
+`POST /api/v1/optimize-svg` accepts one `image` SVG file and an optional coordinate `precision` of `2`, `3`, or `4`. It returns JSON containing the optimized SVG, byte reduction, element statistics, and counts of removed scripts, event handlers, images, `foreignObject`, unsafe styles, and external references. Safe self-contained CSS is preserved. SVG is limited to 2 MiB and 50,000 elements. DOCTYPE/entity input is rejected, and the route sets `X-Content-Type-Options: nosniff`.
+
+### 6.8 Asset Recipe ZIP
+
+`POST /api/v1/asset-recipes` accepts exactly one `asset` file and one JSON `options` field. The allowlisted recipe discriminator is `frame`, `icons`, `palette`, `social`, `heic`, `background`, or `watermark`. Raster recipes accept static PNG/JPEG/WebP; `heic` accepts a signature-checked SDR 8-bit HEIF source. The response is a bounded streamed ZIP with generated files and `manifest.json`.
+
+Options are recipe-owned and bounded. Examples include aspect/focus/rotation/trim/padding for `frame`, background/padding/native opt-in for `icons`, title/subtitle/required human alt for `social`, and color tolerance for `background`. The server does not accept raw ImageMagick arguments.
+
+### 6.9 Asset Recipe preview
+
+`POST /api/v1/asset-recipes/preview` accepts the same single asset and options but returns the recipe's representative raster output. Bounded headers expose its role, dimensions, bytes, request ID, and content type for the comparison UI.
+
+### 6.10 Bounded media recipes
+
+`POST /api/v1/media-recipes` accepts one `asset` plus JSON `options` for exactly two recipes:
+
+- `gif-video`: a signature-checked GIF becomes a maximum 30-second/30fps muted-loop VP9 WebM, H.264 MP4, PNG poster, and HTML snippet. The selected background is applied to transparent MP4 regions.
+- `font`: TTF/OTF/TTC/WOFF/WOFF2 becomes a WOFF2 subset and CSS only when `licenseConfirmed` is exactly `true`; family and text are bounded and no raw FontTools options are accepted.
+
+FFmpeg and FontTools run without a shell in the same request-isolation and cancellation boundary. The route returns a streamed ZIP and does not persist the input or output.
+
+### 6.11 Common status codes
 
 | Status | Meaning |
 |---:|---|
@@ -391,23 +442,23 @@ The server key must never be injected into browser JavaScript. The owner manuall
 
 Keep the first implementation small:
 
-1. Show one masked API-key field at the workspace boundary, shared by raster, SVG, and document tools.
+1. Show one masked API-key field at the workspace boundary, shared by raster, SVG, document, and Web Asset Pack tools.
 2. Read and persist the value under the exact `localStorage` key `ohmyimgapikey`; fall back to page memory if browser storage is unavailable.
 3. Disable conversion submission while the field is empty.
-4. One shared fetch helper adds `Authorization: Bearer <key>` to every raster, vector, and document request.
+4. One shared fetch helper adds `Authorization: Bearer <key>` to every protected request.
 5. Never send a conversion request without the header, even to a same-origin route.
 6. Reuse the in-memory value for the lifetime of the loaded page, but verify it independently on every server request.
-7. Reloading or closing the page forgets the key.
+7. Reloading restores the locally stored key in the masked field; the explicit clear action removes it.
 8. A 401 focuses the key field and shows `Invalid API key.` without discarding the chosen image, document source, crop rectangle, preset, or document options.
 9. The user may edit or clear the key explicitly; there is no automatic key discovery or recovery.
 
 The implemented owner preference stores the key in `localStorage` under `ohmyimgapikey`. This exposes the key to JavaScript executing on the same origin and to anyone using that browser profile, so it is acceptable only for this private single-owner deployment. Do not put it in a URL or non-HttpOnly cookie, and revisit the decision before adding third-party scripts, multiple users, or public hosting. No unlock endpoint, signed-cookie session, or key-issuance subsystem is added.
 
-Centralize browser storage in one hook and header behavior in one fetch helper; do not duplicate either across the raster, SVG, and document components. Neither browser module reads `process.env`.
+Centralize browser storage in one hook and header behavior in one fetch helper; do not duplicate either across the raster, SVG, document, and Web Asset Pack components. Neither browser module reads `process.env`.
 
 ## 8. Resource admission and abuse boundaries
 
-An API key prevents anonymous use but does not prevent accidental parallel work or abuse after a key leak. These operations are CPU- and memory-intensive: SVG Auto can evaluate six candidates, raster Auto evaluates multiple encodes, and document conversion starts a bounded WeasyPrint process.
+An API key prevents anonymous use but does not prevent accidental parallel work or abuse after a key leak. These operations are CPU- and memory-intensive: SVG Auto can evaluate six candidates, raster and Web Asset Pack flows evaluate multiple encodes, and document conversion starts a bounded WeasyPrint process.
 
 Add a process-local, non-queued conversion gate:
 
@@ -488,18 +539,30 @@ src/
 |   |-- health/route.ts
 |   `-- v1/
 |       |-- docs-to-pdf/route.ts
+|       |-- inspect-assets/route.ts
 |       |-- optimize-raster/route.ts
-|       `-- vectorize/route.ts
+|       |-- vectorize/route.ts
+|       `-- web-assets/
+|           |-- preview/route.ts
+|           `-- route.ts
 |-- lib/api/
 |   |-- access.ts
 |   |-- job-gate.ts
 |   `-- multipart.ts
-`-- lib/document/
-    |-- html.ts
-    |-- input.ts
-    |-- markdown.ts
-    |-- renderer.ts
-    `-- types.ts
+|-- lib/document/
+|   |-- html.ts
+|   |-- input.ts
+|   |-- markdown.ts
+|   |-- renderer.ts
+|   `-- types.ts
+`-- lib/web-assets/
+    |-- generate.ts
+    |-- inspect.ts
+    |-- options.ts
+    |-- request.ts
+    |-- snippets.ts
+    |-- types.ts
+    `-- zip.ts
 ```
 
 Responsibilities:
@@ -508,9 +571,10 @@ Responsibilities:
 - `job-gate.ts`: maintain a bounded process-local active-job count and return an idempotent release function;
 - `multipart.ts`: enforce a streaming whole-request cap, parse multipart once, and reject unexpected or repeated operation fields;
 - Route Handlers: request ID, access check, permit lifetime, existing multipart validation, core function call, headers, one failure log, and response;
-- existing `lib/raster`, `lib/vector`, and `lib/document`: operation-specific validation, transformation, rendering, and result contracts.
+- existing `lib/raster`, `lib/vector`, and `lib/document`: operation-specific validation, transformation, rendering, and result contracts;
+- `lib/web-assets`: preflight facts, strict recipes, quality-gated variants, target snippets, deterministic manifest, and bounded ZIP streaming.
 
-Do not create repositories, services, controllers, middleware stacks, custom error hierarchies, or a generic pipeline framework. There are three protected routes and one access rule. A shared Next.js Proxy check may be used as an optional early rejection layer, but it must not replace the authorization call inside each conversion Route Handler.
+Do not create repositories, services, controllers, middleware stacks, custom error hierarchies, or a generic pipeline framework. There are six protected routes and one access rule. A shared Next.js Proxy check may be used as an optional early rejection layer, but it must not replace the authorization call inside each conversion Route Handler.
 
 ## 12. Implementation sequence
 
@@ -535,7 +599,7 @@ Do not create repositories, services, controllers, middleware stacks, custom err
 2. Add one shared authenticated fetch helper.
 3. Require a non-empty key before conversion submission.
 4. Focus the masked key field after 401 and preserve pending user work.
-5. Confirm that no key appears in rendered HTML, client bundles, browser storage, or URLs.
+5. Confirm that the configured server key appears in neither server-rendered HTML nor client bundles, and that the owner-entered key is stored only under the documented `localStorage` entry rather than URLs or `sessionStorage`.
 
 ### Phase 4: admission control and deployment docs
 
@@ -596,10 +660,10 @@ Start a second container without the variable and verify health and conversion r
 
 - the key field is visible and masked before the first conversion;
 - once valid source content is present, the conversion button remains actionable while the key is empty; clicking it shows a concise prompt and focuses the masked key field without sending a request;
-- the valid locally stored key is attached to every request in all three workflows;
+- the valid locally stored key is attached to every request in all protected workflows;
 - an invalid key shows only a concise authentication error;
-- reload forgets the key;
-- the key is absent from URLs, HTML, local storage, session storage, console output, and downloaded filenames;
+- reload restores the key in a masked password field and the explicit clear action removes the `localStorage` entry;
+- the configured server key is absent from server-rendered HTML and client bundles; the owner-entered key is absent from URLs, `sessionStorage`, console output, and downloaded filenames, with `localStorage` as the one documented browser copy;
 - Markdown paste/file submission, generated PDF preview, and downloaded PDF bytes behave consistently;
 - the earlier deferred crop interaction checks remain a separate regression checklist.
 
@@ -672,4 +736,20 @@ Verification completed:
 - Docker runtime smoke tests returned 200 for authenticated conversions and 503 from health/conversion routes when the runtime key was absent;
 - the runtime image contained no `/app/.env` file.
 
-The automated browser runner available in this environment failed to load its Playwright module, so the masked-key field still needs a short real-browser interaction pass. The client fetch helper, empty-key guard, 401 focus callback, production rendering build, and all three authenticated pipelines are covered independently below the browser layer.
+The automated browser runner available on 2026-08-24 failed to load its Playwright module. That historical gap was closed by the 2026-09-03 browser verification recorded below.
+
+### 2026-09-03 Web Asset Pack extension
+
+The same access boundary now protects asset inspection, representative preview, and streamed pack generation. The extension keeps the original one-key/no-session/no-CORS model and adds no persistence or public alias.
+
+Verification completed for the extension:
+
+- 158 Vitest tests pass, including preflight signature parsing, strict recipe validation, deterministic and cancellation-safe ZIP streaming, an exact ten-file partial-failure batch, target snippet contracts, independent ICC/CICP preservation, PNG privacy-chunk cleanup, quality gating, route authentication, and real WebP/AVIF encodes;
+- the Next.js production build exposes all six protected routes;
+- the Node 24 Alpine Docker image installs the explicit AVIF encoder plugin and completes a 1×1 AVIF encode/decode smoke test;
+- authenticated production HTTP smoke tests return preflight JSON, a representative output image, and a streamed ZIP, while headerless calls fail with 401;
+- Chrome browser verification covers the Web Asset Pack upload, authenticated preflight, representative preview, all three target profiles, per-asset accessibility, two-file batch and selected-file archives, both direct-stream and memory-fallback downloads, ZIP contents, and a 390px layout with no horizontal overflow;
+- the existing raster flow passed keyboard crop manipulation, resize, two-file sequential batch processing, preview, and downloaded-byte inspection; SVG and tagged-PDF flows also produced valid downloadable artifacts;
+- a wrong key returned 401 and focused the masked key field; reload restored the documented `localStorage` value, explicit clear removed it, and the browser reported no page errors or framework overlay.
+
+On 2026-09-05, eight owner-supplied PNGs covering transparent avatars and logos, a tall text poster, a UI screenshot, a wide hero, illustrations, and Display P3 completed release review. The final-code acceptance aggregate contained 42 quality-gated outputs with zero quality failures, upscales, sensitive metadata leaks, or ICC/CICP signal losses. The corpus exposed and closed regressions in ICC preservation, CICP preservation, and deterministic `tIME` removal; no source asset was copied into the repository.

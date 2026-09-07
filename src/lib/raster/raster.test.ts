@@ -27,6 +27,7 @@ import {
   manualOptimizeArgs,
   metadataArgs,
   optimizeRaster,
+  stripPngPrivateChunks,
 } from "./optimize-raster";
 import { validateRaster } from "./validate-raster";
 
@@ -226,6 +227,39 @@ describe("raster presets", () => {
     expect(args).toContain("!icc,*");
     expect(args).not.toContain("*");
     expect(args).toContain("comment");
+  });
+
+  it("removes PNG text metadata without removing color profile chunks", () => {
+    const chunk = (type: string) => {
+      const value = Buffer.alloc(12);
+      value.write(type, 4, "ascii");
+      return value;
+    };
+    const source = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      chunk("cICP"),
+      chunk("IDAT"),
+      chunk("IEND"),
+    ]);
+    const candidate = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      chunk("iCCP"),
+      chunk("eXIf"),
+      chunk("iTXt"),
+      chunk("tEXt"),
+      chunk("zTXt"),
+      chunk("tIME"),
+      chunk("IDAT"),
+      chunk("IEND"),
+    ]);
+    const output = stripPngPrivateChunks(candidate, source);
+    expect(output.includes(Buffer.from("iCCP"))).toBe(true);
+    expect(output.includes(Buffer.from("cICP"))).toBe(true);
+    expect(output.includes(Buffer.from("eXIf"))).toBe(false);
+    expect(output.includes(Buffer.from("iTXt"))).toBe(false);
+    expect(output.includes(Buffer.from("tEXt"))).toBe(false);
+    expect(output.includes(Buffer.from("zTXt"))).toBe(false);
+    expect(output.includes(Buffer.from("tIME"))).toBe(false);
   });
 
   it("creates a safe same-format download name", () => {

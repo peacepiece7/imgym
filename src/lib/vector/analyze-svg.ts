@@ -1,5 +1,6 @@
 import { optimize, type CustomPlugin } from "svgo";
 import type { SvgStats } from "./types";
+import { hasUnsafeCss } from "./svgo";
 
 const PATH_COMMAND = /[MmZzLlHhVvCcSsQqTtAa]/g;
 const COLOR_ATTRIBUTES = new Set([
@@ -10,6 +11,15 @@ const COLOR_ATTRIBUTES = new Set([
   "stroke",
 ]);
 const UNSAFE_ELEMENTS = new Set(["foreignobject", "image", "script"]);
+
+function hasExternalUrl(value: string) {
+  const urls = value.matchAll(/url\s*\(([^)]*)\)/gi);
+  for (const match of urls) {
+    const target = match[1].trim().replace(/^['"]|['"]$/g, "");
+    if (!target.startsWith("#")) return true;
+  }
+  return false;
+}
 
 function addColor(colors: Set<string>, value: string) {
   const normalized = value.trim().toLowerCase();
@@ -37,6 +47,10 @@ export function analyzeSvg(svg: string): SvgStats {
           if (UNSAFE_ELEMENTS.has(node.name.toLowerCase())) {
             throw new Error("Unsafe SVG output");
           }
+          if (node.name.toLowerCase() === "style") {
+            const css = node.children.map((child) => child.type === "text" ? child.value : "").join("");
+            if (hasUnsafeCss(css)) throw new Error("Unsafe SVG output");
+          }
 
           if (node.name === "path") {
             stats.paths += 1;
@@ -50,6 +64,7 @@ export function analyzeSvg(svg: string): SvgStats {
             if ((name === "href" || name === "xlink:href") && !value.startsWith("#")) {
               throw new Error("Unsafe SVG output");
             }
+            if (hasExternalUrl(value)) throw new Error("Unsafe SVG output");
             if (COLOR_ATTRIBUTES.has(name)) {
               addColor(colors, value);
             }

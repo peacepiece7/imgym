@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { POST } from "@/app/api/v1/vectorize/route";
+import { POST as optimizeDirectSvgRoute } from "@/app/api/v1/optimize-svg/route";
 import { analyzeSvg } from "./analyze-svg";
+import { optimizeDirectSvg } from "./direct-svg";
 import { autoOptimizeVector } from "./auto-optimize";
 import { resolveVectorCleanup } from "./cleanup-presets";
 import { isVectorCleanupOptions, parseVectorCleanupOptions } from "./cleanup-types";
@@ -203,10 +205,37 @@ describe("vector pipeline", () => {
   });
 
   it("removes active content and rejects unsafe vector output", () => {
-    const source = '<svg viewBox="0 0 10 10"><script>alert(1)</script><path fill="#fff" d="M0 0h1v1z"/></svg>';
+    const source = '<svg viewBox="0 0 10 10"><title>Mark</title><desc>Brand mark</desc><script>alert(1)</script><image href="https://example.com/a.png"/><foreignObject/><path onclick="alert(1)" fill="url(https://example.com/a)" d="M0 0h1v1z"/></svg>';
     const optimized = optimizeSvg(source);
     expect(optimized.svg).not.toContain("script");
+    expect(optimized.svg).not.toContain("foreignObject");
+    expect(optimized.svg).not.toContain("https://");
+    expect(optimized.svg).toContain("<title>Mark</title>");
+    expect(optimized.svg).toContain("<desc>Brand mark</desc>");
     expect(() => analyzeSvg('<svg><foreignObject /></svg>')).toThrow("Unsafe SVG output");
+  });
+
+  it("does not invent a viewBox from percentage dimensions or retain external stylesheets", () => {
+    const result = optimizeSvg('<?xml-stylesheet href="https://example.com/a.css"?><svg width="100%" height="100%"><path d="M0 0h200v300z"/></svg>');
+    expect(result.svg).not.toContain("xml-stylesheet");
+    expect(result.svg).not.toContain("viewBox");
+  });
+
+  it("preserves zero-length marker lines whose rendering differs as paths", () => {
+    const result = optimizeSvg('<svg viewBox="0 0 20 20"><defs><marker id="dot"><circle cx="5" cy="5" r="5"/></marker></defs><line x1="10" y1="10" x2="10" y2="10" marker-start="url(#dot)"/></svg>');
+    expect(result.svg).toContain("<line");
+    expect(result.svg).toContain('marker-start="url(#');
+  });
+
+  it("optimizes a direct SVG with a bounded safety report", () => {
+    const result = optimizeDirectSvg(
+      '<svg width="10" height="10"><script/><path onclick="x()" d="M0 0h10v10z"/></svg>',
+      "brand.svg",
+    );
+    expect(result.downloadName).toBe("brand.svg");
+    expect(result.svg).toContain("viewBox");
+    expect(result.safety).toMatchObject({ scriptsRemoved: 1, eventHandlersRemoved: 1 });
+    expect(result.stats.elements).toBeGreaterThan(0);
   });
 
   it("creates a safe SVG filename", () => {
@@ -304,5 +333,37 @@ describe("POST /api/v1/vectorize", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Animated images are not supported" });
+  });
+});
+
+describe("POST /api/v1/optimize-svg", () => {
+  it("preserves self-contained CSS but removes unsafe style imports", async () => {
+    const form = new FormData();
+    form.set("image", new File([
+      '<svg width="16" height="16"><style>.x{fill:red}</style><path class="x" d="M0 0h16v16z"/></svg>',
+    ], "icon.svg", { type: "image/svg+xml" }));
+    const response = await optimizeDirectSvgRoute(authorizedVectorRequest(form));
+    const result = await response.json();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(result).toMatchObject({ downloadName: "icon.svg", safety: { stylesRemoved: 0 } });
+    expect(result.svg).toContain("fill:red");
+
+    const unsafeForm = new FormData();
+    unsafeForm.set("image", new File([
+      '<svg width="16" height="16"><style>@import url(https://example.com/a.css);.x{fill:red}</style><path class="x" d="M0 0h16v16z"/></svg>',
+    ], "unsafe.svg", { type: "image/svg+xml" }));
+    const unsafeResponse = await optimizeDirectSvgRoute(authorizedVectorRequest(unsafeForm));
+    const unsafeResult = await unsafeResponse.json();
+    expect(unsafeResult.safety.stylesRemoved).toBe(1);
+    expect(unsafeResult.svg).not.toContain("<style");
+  });
+
+  it("rejects XML entities before optimization", async () => {
+    const form = new FormData();
+    form.set("image", new File(['<!DOCTYPE svg [<!ENTITY x "boom">]><svg><text>&x;</text></svg>'], "bad.svg"));
+    const response = await optimizeDirectSvgRoute(authorizedVectorRequest(form));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Unsupported SVG" });
   });
 });

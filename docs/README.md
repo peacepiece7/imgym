@@ -1,28 +1,38 @@
-# OhMyImg Research Documents
+# Oh My Img! 문서 색인
 
-- [Manual deployment at `dev.margins.cloud/imgym`](./manual-deployment.md)
-- [Vectorization and optimization design](./image-optimization-design.md)
-- [Raster cleanup and vector path cleanup design](./vector-cleanup-design.md)
-- [Raster crop and optimization design](./raster-crop-and-optimization-design.md)
-- [Multi-image upload and batch processing design](./multi-image-upload-design.md)
-- [External API access design](./external-api-access-design.md)
-- [Document to PDF design](./document-to-pdf-design.md)
-- [Quality calibration guide](./quality-calibration-guide.md)
-- [Implementation review — 2026-08-23](./implementation-review-2026-08-23.md)
-- [Image Vectorization: a Review (arXiv:2306.06441v1)](./papers/2306.06441-image-vectorization-review.pdf)
-- [Towards Layer-wise Image Vectorization (CVPR 2022)](./papers/ma-2022-layer-wise-image-vectorization.pdf)
+처음 보는 사람은 [프로젝트 위키 홈](./wiki/home.md)에서 시작하세요. 위키는 현재 코드와 운영 상태를 짧게 설명하고, 아래 문서는 조사 근거와 구현 역사를 보존합니다.
 
-The paper PDFs are stored unchanged. Their design implications and the SVG roadmap are recorded in the vectorization design. The vector cleanup document specifies no-dither palette reduction, noise/alpha/gradient controls, similarity-reference semantics, and safe post-vector cleanup. The raster document records the implemented crop, bounded Raster R2 pipeline, and initial opt-in Raster R3 quality-gated candidate search. The multi-image document specifies a browser-owned sequential queue over the unchanged single-file APIs, per-file raster crops, partial success, and deferred client-side ZIP output. The external API document records the implemented mandatory single-key, per-request access boundary. The document design records the implemented semantic Markdown-to-PDF pipeline, copy contract, pagination behavior, and process isolation.
+## 현재 상태 위키
 
-## Current roadmap
+- [위키 홈](./wiki/home.md)
+- [프로젝트 구조](./wiki/project-shape.md)
+- [작업 흐름과 API](./wiki/workflows-and-api.md)
+- [운영 가이드](./wiki/operations.md)
+- [유지보수 가이드](./wiki/maintenance.md)
 
-The implemented baseline now consists of Multi-image R1, Raster R1/R2, SVG V1/V2, the single-key API, and Markdown-to-PDF V1. Remaining work is deliberately ordered as follows:
+## 운영·사용 가이드
 
-1. Run corpus calibration with owner-selected photos, logos, transparent assets, illustrations, and screenshots; retain the machine report and human-reviewed contact sheet before changing any quality gate.
-2. Complete the recorded real-browser checks when a browser instance is available, including the previously deferred crop checklist, multi-image queue, and PDF upload/preview/download flow.
-3. Calibrate the implemented vector-cleanup Phase A, then add its normalized crop/cleaned preview and cleaned-reference Auto integration.
-4. Calibrate the initial Raster R3 Standard/Smaller implementation, record internal candidate telemetry, remove dominated combinations, and retain Standard as the fallback.
-5. Add client-side ZIP for successful batch results only after individual batch downloads and memory behavior are verified.
-6. Consider SVG V3 mutations, Potrace, cross-format WebP/AVIF output, DOCX/imported document assets, or API-key issuance only when calibration or a concrete private use case justifies the added path.
+- [수동 배포](./manual-deployment.md)
+- [품질 보정](./quality-calibration-guide.md)
+- [외부 API 접근과 계약](./external-api-access-design.md)
 
-Corpus calibration and browser checks are evidence tasks, not missing production branches. Synthetic fixtures exercise regressions but cannot honestly replace the owner's visual acceptance decisions on representative private images.
+## 설계와 연구
+
+- [벡터화와 SVG 최적화](./image-optimization-design.md)
+- [래스터 전처리와 벡터 경로 정리](./vector-cleanup-design.md)
+- [래스터 크롭과 최적화](./raster-crop-and-optimization-design.md)
+- [다중 이미지 업로드와 배치](./multi-image-upload-design.md)
+- [Markdown 문서의 PDF 변환](./document-to-pdf-design.md)
+- [에셋 유틸리티 조사와 우선순위](./asset-utility-feature-prioritization.md)
+
+## 날짜가 있는 구현 검토
+
+- [2026-08-23 구현 검토](./implementation-review-2026-08-23.md)
+- [2026-09-06 P0/P1/P2 구현 검토](./p0-p1-p2-implementation-review-2026-09-06.md)
+
+## 원문 자료
+
+- [Image Vectorization: a Review](./papers/2306.06441-image-vectorization-review.pdf)
+- [Towards Layer-wise Image Vectorization](./papers/ma-2022-layer-wise-image-vectorization.pdf)
+
+날짜가 있는 문서의 테스트 수와 로드맵은 역사적 기록입니다. 현재 계약은 위키와 코드에서 확인하고, 수치가 필요하면 현재 커밋에서 검증 명령을 다시 실행합니다.

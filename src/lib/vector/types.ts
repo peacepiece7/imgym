@@ -25,6 +25,26 @@ export interface SvgStats {
   colors: number;
 }
 
+export interface DirectSvgApiResult {
+  svg: string;
+  downloadName: string;
+  input: { bytes: number };
+  output: {
+    bytes: number;
+    savedBytes: number;
+    optimizationPercent: number;
+  };
+  safety: {
+    scriptsRemoved: number;
+    eventHandlersRemoved: number;
+    embeddedImagesRemoved: number;
+    foreignObjectsRemoved: number;
+    stylesRemoved: number;
+    externalReferencesRemoved: number;
+  };
+  stats: SvgStats;
+}
+
 export interface VectorizeApiResult {
   svg: string;
   downloadName: string;
