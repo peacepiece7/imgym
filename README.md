@@ -89,7 +89,7 @@ POST /imgym/api/v1/docs-to-pdf
 1. [위키 홈](./docs/wiki/home.md) — 문서 지도와 현재 상태
 2. [프로젝트 구조](./docs/wiki/project-shape.md) — 런타임, 코드 계층, 신뢰 경계
 3. [작업 흐름과 API](./docs/wiki/workflows-and-api.md) — 기능별 파이프라인과 제한
-4. [운영 가이드](./docs/wiki/operations.md) — 로컬 실행, 배포, 점검, 복구
+4. [운영 가이드](./docs/wiki/operations.md) — 로컬 실행과 배포
 5. [유지보수 가이드](./docs/wiki/maintenance.md) — 변경 위치, 불변 조건, 완료 기준
 
 상세한 연구·설계·검토 기록은 [문서 색인](./docs/README.md)에 보존합니다. 위키는 현재 동작을 설명하고, 날짜가 붙은 검토 문서는 당시의 증거와 의사결정을 설명합니다.

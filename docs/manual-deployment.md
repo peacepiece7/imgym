@@ -1,93 +1,52 @@
-# Manual deployment at `dev.margins.cloud/imgym`
+# `dev.margins.cloud/imgym` 배포
 
-## Deployment contract
+Oh My Img는 Docker Compose로 실행하고 기존 Nginx를 통해 아래 주소에 공개합니다.
 
-OhMyImg is built with the immutable Next.js `basePath` `/imgym` and is served at:
+<https://dev.margins.cloud/imgym>
 
-```text
-https://dev.margins.cloud/imgym
-```
+Next.js의 `basePath`가 `/imgym`으로 고정되어 있으므로 Nginx에서 이 경로를 제거하지 않습니다. 앱 컨테이너는 외부 포트를 직접 열지 않고 `127.0.0.1:5820`으로 연결합니다.
 
-The host Node.js version is irrelevant. The multi-stage Docker build pins Node.js 24 Alpine and installs ImageMagick, librsvg, WeasyPrint, and the required fonts inside the image. Nginx is the only public entry point; Compose binds the application only to `127.0.0.1:5820`.
+## 최초 1회 설정
 
-Do not strip `/imgym` in Nginx. Next.js must receive the preserved path so its pages, Route Handlers, and `/_next` assets stay in the same isolated path namespace.
-
-## One-time host preparation
-
-Create the application directory as the SSH user:
+서버에 저장소를 받습니다.
 
 ```sh
 sudo install -d -o peacepiece -g peacepiece /opt/imgym
 git clone https://github.com/peacepiece7/imgym.git /opt/imgym
+cd /opt/imgym
 ```
 
-Create `/opt/imgym/.env` without committing it:
+`/opt/imgym/.env`에 개인 API 키를 넣고 파일 권한을 제한합니다.
 
 ```dotenv
-OHMYIMG_API_KEY=replace-with-a-new-random-value
+OHMYIMG_API_KEY=32자-이상의-개인-키
 ```
 
-Generate a value on any trusted machine and restrict the file:
-
 ```sh
-node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
 chmod 600 /opt/imgym/.env
 ```
 
-Node.js is not required on the production host for building or running OhMyImg.
-
-Copy `deploy/nginx-imgym.locations.conf` to `/etc/nginx/snippets/imgym.conf`, then add this line inside the existing `dev.margins.cloud` HTTPS `server` block:
+`deploy/nginx-imgym.locations.conf`를 `/etc/nginx/snippets/imgym.conf`로 복사하고, 기존 `dev.margins.cloud` HTTPS `server` 블록 안에 다음 한 줄을 추가합니다.
 
 ```nginx
 include /etc/nginx/snippets/imgym.conf;
 ```
 
-The Nginx request limit is deliberately `12m`: an encoded image may be 10 MiB, and the multipart envelope adds bytes around it. The 10-second value is a connection timeout, not a conversion deadline. Response and send timeouts are 100 seconds because bounded Auto searches may run for up to 90 seconds.
-
-Validate and reload Nginx:
+설정을 반영합니다.
 
 ```sh
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-No DNS, Certbot, firewall, host Node.js, host ImageMagick, or public application port change is required.
-
-## First start
+## 배포
 
 ```sh
 cd /opt/imgym
-docker compose build
-docker compose up -d
-docker compose ps
-```
-
-Verify the private upstream before testing Nginx:
-
-```sh
-curl --fail http://127.0.0.1:5820/imgym/api/health
-curl --fail https://dev.margins.cloud/imgym/api/health
-```
-
-Then open `https://dev.margins.cloud/imgym` and enter the same API key in the UI. The browser stores it under `localStorage.ohmyimgapikey` on the shared `dev.margins.cloud` origin. Next.js treats the no-trailing-slash URL as canonical; both the exact `/imgym` location and its `/imgym/` descendants must be proxied rather than redirected by Nginx.
-
-## Manual update and rollback
-
-Record the current revision, fast-forward, rebuild, and replace the container:
-
-```sh
-cd /opt/imgym
-git rev-parse HEAD
-git fetch origin
-git checkout main
 git pull --ff-only
-docker compose build
-docker compose up -d
-docker compose ps
+docker compose up -d --build
 ```
 
-For rollback, check out the recorded commit and run the last three Docker commands again. Compose keeps the host port private and recreates only the OhMyImg container; it does not modify the Margins containers or services.
+이후 업데이트도 같은 명령으로 배포합니다. 배포가 끝나면 <https://dev.margins.cloud/imgym>을 열고 `/opt/imgym/.env`의 API 키를 입력합니다.
 
-## Access control
-
-Bearer authentication remains mandatory for every conversion request. The UI and health endpoint remain visible until access control is added to the entire `dev.margins.cloud` server. Because path-based applications share one browser origin, JavaScript served elsewhere on `dev.margins.cloud` can access the same local storage. This is acceptable only while both applications and the browser profile remain owner-controlled.
+페이지는 외부에 공개되지만 모든 변환 요청에는 API 키가 필요합니다. 입력한 키는 브라우저의 `localStorage.ohmyimgapikey`에 저장됩니다.
