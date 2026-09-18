@@ -108,6 +108,19 @@ describe("web asset options", () => {
     expect(resolveWebAssetWidths(500, parsed!)).toEqual([{ width: 320 }, { width: 500 }]);
   });
 
+  it("rejects a crop that leaves the frame and keeps per-asset crops positional", () => {
+    const form = new FormData();
+    form.set("options", JSON.stringify(options({ crop: { x: 0.8, y: 0, width: 0.5, height: 1 } })));
+    expect(parseWebAssetOptions(form.get("options"))).toBeNull();
+    form.set("options", JSON.stringify(options({
+      crops: [null, { x: 0.25, y: 0.25, width: 0.5, height: 0.5 }],
+    })));
+    expect(parseWebAssetOptions(form.get("options"))?.crops).toEqual([
+      null,
+      { x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+    ]);
+  });
+
   it("requires human context for non-decorative alt text", () => {
     const form = new FormData();
     form.set("options", JSON.stringify(options({ altText: "" })));
@@ -358,14 +371,14 @@ describe("web asset generation", () => {
   }, 120_000);
 
   it("prunes low-value automatic widths but keeps custom widths", async () => {
-    const generated = await runMagick(["-size", "960x540", "xc:#34506a", "png:-"]);
+    const generated = await runMagick(["-size", "1920x1080", "xc:#34506a", "png:-"]);
     await withMagickTempDirectory(async (directory) => {
       const automatic = await generateWebAssetPack([
         { name: "flat.png", mime: "image/png", data: generated.stdout },
-      ], options({ layout: "card", includeWebp: false }), directory);
+      ], options({ includeWebp: false }), directory);
       const automaticWidths = automatic.manifest.items[0].outputs?.map(({ width }) => width);
-      expect(automaticWidths).toEqual([320, 960]);
-      expect(automatic.manifest.items[0].pruned?.filter(({ reason }) => reason === "no-byte-benefit")).toHaveLength(2);
+      expect(automaticWidths).toEqual([640, 1920]);
+      expect(automatic.manifest.items[0].pruned?.filter(({ reason }) => reason === "no-byte-benefit")).toHaveLength(1);
     });
     await withMagickTempDirectory(async (directory) => {
       const custom = await generateWebAssetPack([
@@ -375,25 +388,41 @@ describe("web asset generation", () => {
     });
   });
 
-  it("emits current Next.js 16 and design handoff contracts", async () => {
+  it("emits one file and a current Next.js 16 snippet for the single profile", async () => {
     await withMagickTempDirectory(async (directory) => {
-      const nextPack = await generateWebAssetPack([
+      const singlePack = await generateWebAssetPack([
         { name: "source.png", mime: "image/png", data: fixture("png") },
-      ], options({ profile: "next", loading: "lcp", includePlaceholder: true }), directory);
-      const snippet = nextPack.entries.find(({ name }) => name.endsWith(".tsx"));
+      ], options({ profile: "single", loading: "lcp", includePlaceholder: true }), directory);
+      const snippet = singlePack.entries.find(({ name }) => name.endsWith(".tsx"));
       expect(snippet && "data" in snippet ? snippet.data.toString() : "").toContain("preload");
       expect(snippet && "data" in snippet ? snippet.data.toString() : "").toContain("blurDataURL");
       expect(snippet && "data" in snippet ? snippet.data.toString() : "").not.toContain("priority");
-      expect(nextPack.manifest.items[0].outputs).toHaveLength(1);
+      expect(singlePack.manifest.items[0].outputs).toHaveLength(1);
+      expect(singlePack.manifest.items[0].outputs?.[0].purpose).toBe("single");
     });
-    const designSource = await runMagick(["-size", "96x96", "xc:#34506a", "png:-"]);
+    const wide = await runMagick(["-size", "1600x900", "xc:#34506a", "png:-"]);
     await withMagickTempDirectory(async (directory) => {
-      const designPack = await generateWebAssetPack([
-        { name: "source.png", mime: "image/png", data: designSource.stdout },
-      ], options({ profile: "design", designBaseWidth: 32 }), directory);
-      expect(designPack.manifest.items[0].outputs?.map(({ scale }) => scale)).toEqual([1, 2, 3]);
-      expect(designPack.manifest.items[0].outputs?.map(({ width }) => width)).toEqual([32, 64, 96]);
-      expect(designPack.entries.some(({ name }) => name.endsWith(".json"))).toBe(true);
+      const scaled = await generateWebAssetPack([
+        { name: "wide.png", mime: "image/png", data: wide.stdout },
+      ], options({ profile: "single", targetSize: "mobile" }), directory);
+      expect(scaled.manifest.items[0].outputs?.map(({ width }) => width)).toEqual([640]);
+    });
+  });
+
+  it("crops before resizing and reports the region it used", async () => {
+    const generated = await runMagick(["-size", "100x80", "xc:#34506a", "png:-"]);
+    await withMagickTempDirectory(async (directory) => {
+      const pack = await generateWebAssetPack([
+        { name: "flat.png", mime: "image/png", data: generated.stdout },
+      ], options({
+        profile: "single",
+        crop: { x: 0, y: 0, width: 0.5, height: 1 },
+      }), directory);
+      const output = pack.manifest.items[0].outputs?.[0];
+      expect(output?.width).toBe(50);
+      expect(output?.height).toBe(80);
+      expect(pack.manifest.items[0].crop).toEqual({ x: 0, y: 0, width: 0.5, height: 1 });
+      expect(pack.manifest.items[0].input?.width).toBe(100);
     });
   });
 
@@ -451,7 +480,7 @@ describe("web asset routes", () => {
   it("returns a quality-gated representative output for preview and individual download", async () => {
     const form = new FormData();
     form.set("images", new File([fixture("png")], "sample.png", { type: "image/png" }));
-    form.set("options", JSON.stringify(options({ profile: "next", includePlaceholder: true })));
+    form.set("options", JSON.stringify(options({ profile: "single", includePlaceholder: true })));
     const response = await previewWebAsset(authorizedRequest("http://localhost/api/v1/web-assets/preview", form));
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/png");

@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, KeyRound, WandSparkles } from "lucide-react";
+import { BookOpen, Check, KeyRound, WandSparkles } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { setLocalApiKey } from "@/hooks/use-local-api-key";
@@ -64,7 +65,18 @@ export function AppSidebar({ tool, onToolChange, apiKey, editingKey, onEditingKe
         );
       })}
 
-      <div className="mt-auto flex flex-col gap-2 border-t border-border px-2 pt-3.5">
+      <div className="mt-auto px-2 pb-3">
+        <Link
+          href="/api-docs"
+          className="flex items-center gap-2 rounded-lg border border-border bg-background/30 px-2.5 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <BookOpen className="size-3.5" aria-hidden="true" />
+          API 문서
+          <span className="ml-auto font-mono text-[9px] text-primary">v1</span>
+        </Link>
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-border px-2 pt-3.5">
         {editingKey ? (
           <label className="flex flex-col gap-1.5">
             <span className="flex items-center gap-1.5 text-xs font-medium">

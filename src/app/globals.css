@@ -130,3 +130,33 @@ body {
     @apply font-sans;
   }
 }
+
+.api-reference-grid {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.018) 1px, transparent 1px),
+    radial-gradient(circle at 76% 8%, rgb(251 146 60 / 0.07), transparent 28rem);
+  background-size: 4rem 4rem, 4rem 4rem, 100% 100%;
+  background-position: center top;
+}
+
+.api-endpoint::details-content {
+  block-size: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    block-size 240ms ease,
+    opacity 180ms ease,
+    content-visibility 240ms allow-discrete;
+}
+
+.api-endpoint[open]::details-content {
+  block-size: auto;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .api-endpoint::details-content {
+    transition: none;
+  }
+}

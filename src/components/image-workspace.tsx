@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import { useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { DocumentWorkspace } from "@/components/document-workspace";
-import { RasterWorkspace } from "@/components/raster-workspace";
 import { Button } from "@/components/ui/button";
 import { VectorWorkspace } from "@/components/vector-workspace";
 import { WebAssetWorkspace } from "@/components/web-asset-workspace";
@@ -69,8 +68,6 @@ export function ImageWorkspace() {
           <WebAssetWorkspace apiKey={apiKey} onUnauthorized={promptForApiKey} onNavigate={changeTool} />
         ) : tool === "recipes" ? (
           <AssetRecipeWorkspace apiKey={apiKey} onUnauthorized={promptForApiKey} />
-        ) : tool === "raster" ? (
-          <RasterWorkspace apiKey={apiKey} onUnauthorized={promptForApiKey} />
         ) : tool === "vector" ? (
           <VectorWorkspace apiKey={apiKey} onUnauthorized={promptForApiKey} />
         ) : (

@@ -1,6 +1,6 @@
-import { Crop, FileText, Globe, LayoutGrid, PenTool, type LucideIcon } from "lucide-react";
+import { FileText, ImagePlus, LayoutGrid, PenTool, type LucideIcon } from "lucide-react";
 
-export type Tool = "web-assets" | "recipes" | "raster" | "vector" | "document";
+export type Tool = "web-assets" | "recipes" | "vector" | "document";
 
 export interface ToolMeta {
   id: Tool;
@@ -18,14 +18,15 @@ export interface ToolMeta {
 export const TOOLS: readonly ToolMeta[] = [
   {
     id: "web-assets",
-    label: "웹사이트에 올릴 이미지",
-    summary: "여러 화면 크기용 파일 + 붙여넣을 코드",
-    icon: Globe,
-    heading: "웹사이트에 올릴 이미지 만들기",
-    description: "올린 이미지를 화면 크기별로 만들고, 화질을 확인한 뒤 압축 파일 하나로 내려받습니다.",
+    label: "이미지 만들기",
+    summary: "자르기 · 기기별 포맷 · 용량 줄이기",
+    icon: ImagePlus,
+    heading: "이미지 만들기",
+    description: "올린 이미지를 필요한 부분만 남기고, 기기별 파일 또는 한 장으로 만든 뒤 압축 파일 하나로 내려받습니다.",
     help: [
       "이미지를 올리면 실제 형식과 크기, 안에 든 정보를 먼저 확인합니다.",
-      "어디에 쓸 이미지인지 하나만 고르면 크기와 형식이 자동으로 정해집니다.",
+      "남길 부분만 끌어서 자릅니다. 그대로 두면 전체를 씁니다.",
+      "‘기기별 포맷 생성’과 ‘원본 한 장’ 중 하나만 고르면 나머지는 자동으로 정해집니다.",
       "만든 결과를 원본과 비교해 눈에 띄는 차이가 없는지 확인합니다.",
       "파일과 붙여넣을 코드를 압축 파일 하나로 받습니다. 서버에는 남지 않습니다.",
     ],
@@ -40,18 +41,6 @@ export const TOOLS: readonly ToolMeta[] = [
     help: [
       "만들려는 결과를 고르면 크기와 형식이 함께 정해집니다.",
       "여러 이미지를 한 번에 올려 같은 설정으로 처리할 수 있습니다.",
-    ],
-  },
-  {
-    id: "raster",
-    label: "사진 자르기 · 용량 줄이기",
-    summary: "PNG · JPEG · WebP 한 장씩",
-    icon: Crop,
-    heading: "사진 자르기 · 용량 줄이기",
-    description: "사진 한 장을 원하는 부분만 남기고, 화질을 지키면서 용량을 줄입니다.",
-    help: [
-      "필요한 부분만 남기도록 자르고 크기를 정합니다.",
-      "원본과 비교해 눈에 띄는 차이가 없는 선에서 가장 작은 파일을 고릅니다.",
     ],
   },
   {

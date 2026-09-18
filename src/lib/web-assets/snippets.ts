@@ -1,5 +1,4 @@
 import type {
-  AssetFacts,
   WebAssetOptions,
   WebAssetOutput,
 } from "@/lib/web-assets/types";
@@ -10,7 +9,7 @@ import type {
  */
 export type SnippetOutput = Pick<
   WebAssetOutput,
-  "path" | "purpose" | "format" | "width" | "height" | "scale"
+  "path" | "purpose" | "format" | "width" | "height"
 >;
 
 function htmlAttribute(value: string) {
@@ -86,17 +85,4 @@ export function nextImageSnippet(
     "}",
     "",
   ].filter((line) => line !== "").join("\n");
-}
-
-export function designHandoffSnippet(
-  facts: AssetFacts,
-  outputs: readonly SnippetOutput[],
-  options: WebAssetOptions,
-) {
-  return `${JSON.stringify({
-    source: facts.sourceName,
-    colorPolicy: options.colorPolicy,
-    resampling: "ImageMagick Lanczos, no upscale",
-    exports: outputs.map(({ path, width, height, scale, format }) => ({ path, width, height, scale, format })),
-  }, null, 2)}\n`;
 }

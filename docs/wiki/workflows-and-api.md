@@ -18,11 +18,10 @@ Common statuses are 400 invalid input, 401 bad/missing request key, 413 size lim
 | --- | --- | --- | --- |
 | Web Asset Pack | `inspect-assets`, `web-assets`, `web-assets/preview` | `src/lib/web-assets/` | JSON inspection, preview image, streamed ZIP |
 | Asset Recipes | `asset-recipes`, `asset-recipes/preview`, `media-recipes`, `optimize-svg` | `src/lib/asset-recipes/`, `src/lib/vector/direct-svg.ts` | Preview image, JSON SVG result, streamed ZIP |
-| Raster Optimize | `optimize-raster` | `src/lib/raster/` | Same-format image |
 | Make SVG | `vectorize` | `src/lib/vector/` | JSON containing hardened SVG, metrics, and stats |
 | Document to PDF | `docs-to-pdf` | `src/lib/document/` | PDF/UA-1 |
 
-The browser batch controller accepts up to 10 static images and 50 MiB total, then calls the single-file raster/vector APIs sequentially. Partial success is browser-owned; the server does not expose a general asynchronous batch job.
+`optimize-raster` has no workspace of its own: cropping and single-file size reduction moved into the Web Asset Pack workspace as the `single` profile, and the route stays for API callers. The browser batch controller accepts up to 10 static images and 50 MiB total, then calls the single-file raster/vector APIs sequentially. Partial success is browser-owned; the server does not expose a general asynchronous batch job.
 
 ## Route reference
 
@@ -49,15 +48,16 @@ Pipeline:
 
 ```text
 signature inspection -> EXIF display dimensions -> content/color/metadata facts
--> requested profile and widths -> fallback + gated WebP/AVIF candidates
+-> optional crop -> requested profile and widths -> fallback + gated WebP/AVIF candidates
 -> snippet + optional LQIP + deterministic manifest -> streamed ZIP
 ```
 
-Profiles:
+Profiles (recipe `ohmyimg-web-assets-r2`, manifest `ohmyimg.web-assets-manifest.v2`):
 
-- `html`: responsive `<picture>` with `srcset`, `sizes`, dimensions, loading intent, and confirmed alternative text.
-- `next`: one optimized source, optional `blurDataURL`, and Next.js `<Image>` code; it avoids duplicating Next's runtime variants.
-- `design`: bounded 1x/2x/3x exports and a handoff record.
+- `devices`: one width per device class — mobile 640, tablet 1024, desktop 1920 — times the fallback plus gated WebP/AVIF, with a responsive `<picture>` carrying `srcset`, `sizes`, dimensions, loading intent, and confirmed alternative text. `customWidths` overrides the device widths and disables automatic width pruning.
+- `single`: one optimized file, scaled by `targetSize` (`original`, `mobile`, `tablet`, `desktop`, never upscaling), with optional `blurDataURL` and Next.js `<Image>` code; it avoids duplicating Next's runtime variants.
+
+`crop` is a normalized region applied after `-auto-orient` and before resizing, so widths and the quality gate measure the kept pixels rather than the uploaded frame. `crops` carries one entry per image, positionally, like `accessibility`; `null` keeps the whole frame.
 
 The manifest records source/output SHA-256 values, metadata facts, quality scores, pruning reasons, per-file failures, generated code paths, and recipe version. ICC and CICP are treated independently. The `srgb` policy performs a real ICC source-to-sRGB transform and rejects unsafe CICP-only conversion rather than relabeling pixels.
 

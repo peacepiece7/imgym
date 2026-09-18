@@ -34,10 +34,8 @@ export function webAssetPath(
   stem: string,
   width: number,
   format: WebAssetFormat,
-  scale?: 1 | 2 | 3,
 ) {
-  const descriptor = scale ? `@${scale}x` : `-${width}w`;
-  return `assets/${directory}/${stem}${descriptor}.${EXTENSION[format]}`;
+  return `assets/${directory}/${stem}-${width}w.${EXTENSION[format]}`;
 }
 
 export function formatExtension(format: WebAssetFormat) {

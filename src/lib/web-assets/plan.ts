@@ -17,7 +17,7 @@ import type {
  */
 export type PlannedOutput = Pick<
   WebAssetOutput,
-  "path" | "purpose" | "format" | "width" | "height" | "scale"
+  "path" | "purpose" | "format" | "width" | "height"
 >;
 
 export interface WebAssetPlan {
@@ -34,30 +34,35 @@ function fallbackFormat(content: ResolvedContentHint, hasAlpha: boolean): WebAss
   return hasAlpha || content !== "photo" ? "png" : "jpeg";
 }
 
+/** The pixels the pack is built from: what the crop kept, not what was uploaded. */
+export function croppedDimensions(facts: AssetFacts, options: WebAssetOptions) {
+  if (!options.crop) return { width: facts.width, height: facts.height };
+  return {
+    width: Math.max(1, Math.round(options.crop.width * facts.width)),
+    height: Math.max(1, Math.round(options.crop.height * facts.height)),
+  };
+}
+
 export function planWebAssetOutputs(facts: AssetFacts, options: WebAssetOptions): WebAssetPlan {
-  const widths = resolveWebAssetWidths(facts.width, options);
+  const source = croppedDimensions(facts, options);
+  const widths = resolveWebAssetWidths(source.width, options);
   const stem = safeAssetStem(facts.sourceName);
   const directory = assetDirectory(facts.sourceName, facts.sha256);
   const base = fallbackFormat(resolvedContent(options, facts.detectedContent), facts.hasAlpha);
-  const purpose: WebAssetOutput["purpose"] = options.profile === "next"
-    ? "next-source"
-    : options.profile === "design"
-      ? "design-scale"
-      : "fallback";
+  const purpose: WebAssetOutput["purpose"] = options.profile === "single" ? "single" : "fallback";
 
   const build = (format: WebAssetFormat, outputPurpose: WebAssetOutput["purpose"]) =>
-    widths.map<PlannedOutput>(({ width, scale }) => ({
-      path: webAssetPath(directory, stem, width, format, scale),
+    widths.map<PlannedOutput>(({ width }) => ({
+      path: webAssetPath(directory, stem, width, format),
       purpose: outputPurpose,
       format,
       width,
-      height: Math.max(1, Math.round((facts.height * width) / facts.width)),
-      ...(scale ? { scale } : {}),
+      height: Math.max(1, Math.round((source.height * width) / source.width)),
     }));
 
   const outputs = build(base, purpose);
   const formats: WebAssetFormat[] = [base];
-  if (options.profile === "html") {
+  if (options.profile === "devices") {
     for (const [format, enabled] of [["webp", options.includeWebp], ["avif", options.includeAvif]] as const) {
       if (!enabled) continue;
       outputs.push(...build(format, "modern"));

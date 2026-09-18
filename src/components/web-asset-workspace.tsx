@@ -5,18 +5,19 @@ import {
   Check,
   ChevronDown,
   CircleCheck,
-  Code2,
   Copy,
+  Crop as CropIcon,
   Download,
-  Globe,
+  ImageIcon,
   Info,
+  LayoutGrid,
   LoaderCircle,
-  Palette,
   Plus,
   TriangleAlert,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import ReactCrop, { type PercentCrop } from "react-image-crop";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { StepProgress } from "@/components/ui/step-progress";
@@ -24,31 +25,32 @@ import { useObjectUrl } from "@/hooks/use-object-url";
 import { authenticatedApiFetch, koreanApiError } from "@/lib/api/client";
 import { saveZipResponse } from "@/lib/api/download";
 import { formatImageBytes, MAX_BATCH_FILES, selectBatchFiles } from "@/lib/image/batch";
+import { normalizedCropToPixels, percentCropToNormalized } from "@/lib/raster/crop";
+import type { NormalizedCrop } from "@/lib/raster/types";
 import type { Tool } from "@/lib/tools";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_WEB_ASSET_OPTIONS,
-  WEB_ASSET_DEFAULT_SIZES,
-  WEB_ASSET_WIDTH_PRESETS,
+  WEB_ASSET_DEVICE_WIDTHS,
+  WEB_ASSET_DEVICE_WIDTH_LIST,
   resolveWebAssetWidths,
 } from "@/lib/web-assets/options";
-import { planWebAssetOutputs } from "@/lib/web-assets/plan";
-import {
-  designHandoffSnippet,
-  htmlPictureSnippet,
-  nextImageSnippet,
-} from "@/lib/web-assets/snippets";
+import { croppedDimensions, planWebAssetOutputs } from "@/lib/web-assets/plan";
+import { htmlPictureSnippet, nextImageSnippet } from "@/lib/web-assets/snippets";
 import type {
   AssetFacts,
   AssetInspectionItem,
   ResolvedContentHint,
   WebAssetColorPolicy,
   WebAssetContentHint,
-  WebAssetLayout,
   WebAssetLoadingIntent,
   WebAssetOptions,
   WebAssetProfile,
+  WebAssetTargetSize,
 } from "@/lib/web-assets/types";
+
+const FULL_CROP: PercentCrop = { unit: "%", x: 0, y: 0, width: 100, height: 100 };
+const FULL_CROP_EPSILON = 1e-6;
 
 interface WebAssetItem {
   id: string;
@@ -56,6 +58,7 @@ interface WebAssetItem {
   /** The UI offers two answers; the pack format keeps its four-way vocabulary. */
   describes: boolean;
   altText: string;
+  crop: PercentCrop;
   inspection?: AssetInspectionItem;
 }
 
@@ -83,32 +86,27 @@ const PURPOSE: Array<{
   value: WebAssetProfile;
   title: string;
   detail: string;
-  icon: typeof Globe;
+  icon: typeof LayoutGrid;
 }> = [
   {
-    value: "html",
-    title: "일반 웹페이지 · 블로그",
-    detail: "어느 브라우저에서나 열리는 파일과 붙여넣을 HTML",
-    icon: Globe,
+    value: "devices",
+    title: "기기별 포맷 생성",
+    detail: "모바일·태블릿·데스크톱 크기를 형식 3가지로 + 붙여넣을 HTML",
+    icon: LayoutGrid,
   },
   {
-    value: "next",
-    title: "Next.js 프로젝트",
-    detail: "원본 한 장 + <Image> 코드 (중복 파일 없음)",
-    icon: Code2,
-  },
-  {
-    value: "design",
-    title: "디자이너·동료에게 전달",
-    detail: "1배·2배·3배 크기와 내보내기 설명서",
-    icon: Palette,
+    value: "single",
+    title: "원본 한 장",
+    detail: "한 장만 내보냅니다. Next.js <Image> 소스로도 그대로 씁니다.",
+    icon: ImageIcon,
   },
 ];
 
-const PLACEMENT: Array<{ value: WebAssetLayout; label: string }> = [
-  { value: "hero", label: "화면 전체" },
-  { value: "content", label: "본문 안" },
-  { value: "card", label: "카드·목록" },
+const TARGET_SIZE: Array<{ value: WebAssetTargetSize; label: string }> = [
+  { value: "original", label: "원본" },
+  { value: "desktop", label: "데스크톱" },
+  { value: "tablet", label: "태블릿" },
+  { value: "mobile", label: "모바일" },
 ];
 
 const CONTENT_HINT: Array<{ value: WebAssetContentHint; label: string }> = [
@@ -133,8 +131,7 @@ const FAILURE: Record<string, { message: string; action?: { label: string; tool:
     action: { label: "변환하러 가기", tool: "recipes" },
   },
   "File is too large": {
-    message: `한 장에 10MB까지 올릴 수 있어요. ‘사진 자르기 · 용량 줄이기’에서 크기를 줄여 보세요.`,
-    action: { label: "용량 줄이러 가기", tool: "raster" },
+    message: "한 장에 10MB까지 올릴 수 있어요. 더 작은 파일로 다시 올려주세요.",
   },
   "Animated images are not supported": {
     message: "움직이는 이미지는 웹에 올릴 파일로 만들 수 없어요. 한 장짜리 이미지로 올려주세요.",
@@ -143,6 +140,19 @@ const FAILURE: Record<string, { message: string; action?: { label: string; tool:
 
 function failureHelp(error: string) {
   return FAILURE[error] ?? { message: koreanApiError(error, "이 파일은 사용할 수 없어요. 다른 파일로 올려주세요.") };
+}
+
+function isFullCrop(crop: PercentCrop) {
+  return crop.unit === "%"
+    && Math.abs(crop.x) <= FULL_CROP_EPSILON
+    && Math.abs(crop.y) <= FULL_CROP_EPSILON
+    && Math.abs(crop.width - 100) <= FULL_CROP_EPSILON
+    && Math.abs(crop.height - 100) <= FULL_CROP_EPSILON;
+}
+
+/** A full-frame selection is "no crop", so the pack is not asked to cut anything. */
+function croppedRegion(crop: PercentCrop): NormalizedCrop | null {
+  return isFullCrop(crop) ? null : percentCropToNormalized(crop);
 }
 
 function parseWidths(value: string) {
@@ -233,9 +243,8 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeId, setActiveId] = useState("");
   const [profile, setProfile] = useState<WebAssetProfile>(DEFAULT_WEB_ASSET_OPTIONS.profile);
-  const [layout, setLayout] = useState<WebAssetLayout>(DEFAULT_WEB_ASSET_OPTIONS.layout);
+  const [targetSize, setTargetSize] = useState<WebAssetTargetSize>(DEFAULT_WEB_ASSET_OPTIONS.targetSize);
   const [customWidths, setCustomWidths] = useState("");
-  const [designBaseWidth, setDesignBaseWidth] = useState(String(DEFAULT_WEB_ASSET_OPTIONS.designBaseWidth));
   const [sizes, setSizes] = useState(DEFAULT_WEB_ASSET_OPTIONS.sizes);
   const [contentHint, setContentHint] = useState<WebAssetContentHint>(DEFAULT_WEB_ASSET_OPTIONS.contentHint);
   const [colorPolicy, setColorPolicy] = useState<WebAssetColorPolicy>(DEFAULT_WEB_ASSET_OPTIONS.colorPolicy);
@@ -249,7 +258,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
   const [previewing, setPreviewing] = useState(false);
   const [outputPreview, setOutputPreview] = useState<OutputPreview | null>(null);
   const [inspecting, setInspecting] = useState(false);
-  const [previewMode, setPreviewMode] = useState<"output" | "source">("output");
+  const [previewMode, setPreviewMode] = useState<"output" | "source" | "crop">("output");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -260,14 +269,12 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
   const activeAltText = activeItem?.altText ?? "";
   const activeDescribes = activeItem?.describes ?? true;
   const activeFacts = activeItem?.inspection?.status === "ready" ? activeItem.inspection.facts : null;
+  const activeCrop = activeItem ? croppedRegion(activeItem.crop) : null;
   const fileBatchKey = items.map(({ id, file }) => `${id}:${file.size}`).join("|");
   const readyCount = items.filter((item) => item.inspection?.status === "ready").length;
+  const croppedCount = items.filter((item) => !isFullCrop(item.crop)).length;
   const parsedWidths = parseWidths(customWidths);
-  const parsedBaseWidth = Number(designBaseWidth);
   const optionsValid = parsedWidths !== null
-    && Number.isInteger(parsedBaseWidth)
-    && parsedBaseWidth >= 16
-    && parsedBaseWidth <= 4_096
     && sizes.length <= 256
     && !/[<>\r\n]/.test(sizes)
     && items.every((item) => !item.describes || item.altText.trim().length > 0);
@@ -332,9 +339,10 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
     }));
     return {
       profile,
-      layout,
       ...(parsedWidths ? { customWidths: parsedWidths } : {}),
-      designBaseWidth: parsedBaseWidth,
+      targetSize,
+      crop: null,
+      crops: items.map((item) => croppedRegion(item.crop)),
       sizes,
       contentHint,
       colorPolicy,
@@ -342,9 +350,9 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
       altText: accessibility[0]?.text ?? "",
       accessibility,
       loading: loadingIntent,
-      includeWebp: profile === "html" && includeWebp,
-      includeAvif: profile === "html" && includeAvif,
-      includePlaceholder: profile === "next" && includePlaceholder,
+      includeWebp: profile === "devices" && includeWebp,
+      includeAvif: profile === "devices" && includeAvif,
+      includePlaceholder: profile === "single" && includePlaceholder,
     };
   }, [
     colorPolicy,
@@ -353,13 +361,12 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
     includePlaceholder,
     includeWebp,
     items,
-    layout,
     loadingIntent,
     optionsValid,
-    parsedBaseWidth,
     parsedWidths,
     profile,
     sizes,
+    targetSize,
   ]);
 
   const activeOptions = useMemo<WebAssetOptions | null>(() => {
@@ -368,7 +375,8 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
       kind: activeItem.describes ? ("informative" as const) : ("decorative" as const),
       text: activeItem.describes ? activeItem.altText.trim() : "",
     };
-    return { ...options, altKind: entry.kind, altText: entry.text, accessibility: [entry] };
+    const crop = croppedRegion(activeItem.crop);
+    return { ...options, altKind: entry.kind, altText: entry.text, accessibility: [entry], crop, crops: [crop] };
   }, [activeItem, options]);
 
   const activeRecipeKey = activeItem && activeOptions ? `${activeItem.id}:${JSON.stringify(activeOptions)}` : "";
@@ -378,7 +386,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
     [activeFacts, activeOptions],
   );
 
-  // The old flow made you press "대표 출력 검사"; step 3 now does it for you.
+  // The old flow made you press "대표 출력 검사"; step 4 now does it for you.
   useEffect(() => {
     if (!apiKey || !activeItem || !activeOptions || !activeRecipeKey) return;
     if (activeItem.inspection?.status !== "ready") return;
@@ -446,7 +454,8 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
 
   const steps = [
     { label: "이미지 올리기", done: items.length > 0 },
-    { label: "쓰임새 고르기", done: items.length > 0 && optionsValid },
+    { label: "자르기 (선택)", done: items.length > 0 },
+    { label: "결과 형태 고르기", done: items.length > 0 && optionsValid },
     { label: "결과 확인하기", done: items.length > 0 && optionsValid && visibleOutput !== null },
     { label: "내려받기", done: downloaded },
   ];
@@ -456,12 +465,11 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
     "색 처리",
     "첫 화면 여부",
     "화면 크기별 규칙",
-    ...(profile === "html" ? ["WebP 함께 만들기", "AVIF 함께 만들기", "직접 정한 가로 크기"] : []),
-    ...(profile === "next" ? ["흐릿한 미리보기 넣기"] : []),
-    ...(profile === "design" ? ["1배 기준 가로"] : []),
+    ...(profile === "devices" ? ["WebP 함께 만들기", "AVIF 함께 만들기", "직접 정한 가로 크기"] : []),
+    ...(profile === "single" ? ["흐릿한 미리보기 넣기"] : []),
   ];
   const advancedSummary = [
-    profile === "html" ? (includeWebp || includeAvif ? "WebP·AVIF 함께 만들기" : "기본 형식만") : null,
+    profile === "devices" ? (includeWebp || includeAvif ? "WebP·AVIF 함께 만들기" : "기본 형식만") : null,
     colorPolicy === "preserve" ? "색 그대로 유지" : "웹 표준 색으로 변환",
     loadingIntent === "lcp" ? "첫 화면에 바로 보임" : "첫 화면 아님",
   ].filter(Boolean).join(" · ");
@@ -477,6 +485,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
       file,
       describes: true,
       altText: "",
+      crop: { ...FULL_CROP },
     }));
     setItems((current) => [...current, ...additions]);
     setActiveId((current) => current || additions[0]?.id || "");
@@ -495,14 +504,9 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
     if (activeId === id) setActiveId(next[0]?.id ?? "");
   }
 
-  function updateActive(update: Partial<Pick<WebAssetItem, "describes" | "altText">>) {
+  function updateActive(update: Partial<Pick<WebAssetItem, "describes" | "altText" | "crop">>) {
     if (!activeItem) return;
     setItems((current) => current.map((item) => (item.id === activeItem.id ? { ...item, ...update } : item)));
-  }
-
-  function changeLayout(next: WebAssetLayout) {
-    setLayout(next);
-    setSizes(WEB_ASSET_DEFAULT_SIZES[next]);
   }
 
   async function downloadPack() {
@@ -532,6 +536,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
           kind: item.describes ? ("informative" as const) : ("decorative" as const),
           text: item.describes ? item.altText.trim() : "",
         })),
+        crops: targets.map((item) => croppedRegion(item.crop)),
       };
       const body = new FormData();
       targets.forEach(({ file }) => body.append("images", file));
@@ -552,10 +557,12 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
       }
       const outputFiles = Number(response.headers.get("x-output-files") ?? 0);
       const failed = Number(response.headers.get("x-asset-failed") ?? 0);
-      await saveZipResponse(response, "web-assets.zip");
+      const destination = await saveZipResponse(response, "web-assets.zip");
       setDownloaded(true);
       setNotice(
-        `파일 ${outputFiles}개를 압축 파일 하나로 저장했습니다.${failed > 0 ? ` ${failed}개는 만들지 못했습니다.` : ""}`,
+        `파일 ${outputFiles}개를 압축 파일 하나로 ${destination === "disk" ? "저장했습니다" : "내려받았습니다"}.${
+          failed > 0 ? ` ${failed}개는 만들지 못했습니다.` : ""
+        }`,
       );
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") {
@@ -569,13 +576,11 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
   }
 
   async function copySnippet() {
-    if (!activeFacts || !activeOptions || !plan) return;
+    if (!activeOptions || !plan) return;
     try {
-      const code = activeOptions.profile === "next"
+      const code = activeOptions.profile === "single"
         ? nextImageSnippet(plan.outputs[0], activeOptions)
-        : activeOptions.profile === "design"
-          ? designHandoffSnippet(activeFacts, plan.outputs, activeOptions)
-          : htmlPictureSnippet(plan.outputs, activeOptions);
+        : htmlPictureSnippet(plan.outputs, activeOptions);
       await navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2_000);
@@ -588,15 +593,20 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
   const savedPercent = visibleOutput && activeFacts && activeFacts.encodedBytes > 0
     ? Math.round((1 - visibleOutput.bytes / activeFacts.encodedBytes) * 100)
     : null;
-  const showingSource = previewMode === "source" || !visibleOutput;
+  const showCrop = previewMode === "crop";
+  const showingSource = !showCrop && (previewMode === "source" || !visibleOutput);
   const shownUrl = showingSource ? previewUrl : outputUrl;
-  // Each ready image is planned separately: widths clamp to its own dimensions.
+  const cropPixels = activeCrop && activeFacts
+    ? normalizedCropToPixels(activeCrop, activeFacts.width, activeFacts.height)
+    : null;
+  const sourceSize = activeFacts && activeOptions ? croppedDimensions(activeFacts, activeOptions) : null;
+  // Each ready image is planned separately: its own crop, and widths clamp to it.
   const packFileCount = options
     ? items.reduce(
         (total, item) =>
           total
           + (item.inspection?.status === "ready"
-            ? planWebAssetOutputs(item.inspection.facts, options).outputs.length
+            ? planWebAssetOutputs(item.inspection.facts, { ...options, crop: croppedRegion(item.crop) }).outputs.length
             : 0),
         0,
       )
@@ -604,7 +614,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
 
   return (
     <div className="flex flex-col gap-5">
-      <StepProgress steps={steps} label="웹에 올릴 이미지 만들기 단계" />
+      <StepProgress steps={steps} label="이미지 만들기 단계" />
 
       <input
         ref={fileInputRef}
@@ -641,46 +651,88 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
                     </span>
                   ) : null}
                 </div>
-                {visibleOutput ? (
-                  <Segmented
-                    label="미리보기 전환"
-                    value={previewMode}
-                    onChange={setPreviewMode}
-                    options={[
-                      { value: "output", label: "만든 결과" },
-                      { value: "source", label: "올린 원본" },
-                    ]}
-                  />
-                ) : null}
+                <Segmented
+                  label="미리보기 전환"
+                  value={previewMode}
+                  onChange={setPreviewMode}
+                  options={[
+                    { value: "output", label: "만든 결과" },
+                    { value: "source", label: "올린 원본" },
+                    { value: "crop", label: "자르기" },
+                  ]}
+                />
               </div>
 
-              <div className="relative h-[19rem] overflow-hidden rounded-[10px] border bg-[repeating-conic-gradient(oklch(0.25_0_0)_0_25%,oklch(0.2_0_0)_0_50%)] bg-[length:20px_20px]">
-                {shownUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={shownUrl}
-                    alt={`${activeItem.file.name} ${showingSource ? "원본" : "결과"} 미리보기`}
-                    className="size-full object-contain"
-                  />
-                ) : null}
-                <div className="absolute bottom-3.5 left-3.5 flex gap-1.5 font-mono text-[11px]">
-                  {showingSource ? (
-                    activeFacts ? (
-                      <>
-                        <span className="rounded-[7px] bg-background/85 px-2 py-1">{activeFacts.width} × {activeFacts.height}</span>
-                        <span className="rounded-[7px] bg-background/85 px-2 py-1">{formatImageBytes(activeFacts.encodedBytes)}</span>
-                      </>
-                    ) : null
-                  ) : visibleOutput ? (
-                    <>
-                      <span className="rounded-[7px] bg-background/85 px-2 py-1">{visibleOutput.width} × {visibleOutput.height}</span>
-                      <span className="rounded-[7px] bg-background/85 px-2 py-1 uppercase">
-                        {visibleOutput.format.replace("image/", "")} · {formatImageBytes(visibleOutput.bytes)}
-                      </span>
-                    </>
-                  ) : null}
+              {showCrop ? (
+                <div className="flex flex-col gap-2.5">
+                  <div className="grid min-h-[19rem] place-items-center overflow-hidden rounded-[10px] border bg-black/25 p-3">
+                    {previewUrl ? (
+                      <ReactCrop
+                        key={activeItem.id}
+                        crop={activeItem.crop}
+                        onChange={(_, percentCrop) => updateActive({ crop: percentCrop })}
+                        disabled={generating}
+                        minWidth={1}
+                        minHeight={1}
+                        keepSelection
+                        className="max-h-[26rem] max-w-full"
+                      >
+                        {/* Browser decoding supplies the same EXIF-corrected orientation the server uses. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={previewUrl}
+                          alt={`${activeItem.file.name} 자르기`}
+                          className="block max-h-[26rem] max-w-full object-contain"
+                        />
+                      </ReactCrop>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <p aria-live="polite">
+                      {cropPixels
+                        ? `남길 영역 ${cropPixels.width} × ${cropPixels.height}px`
+                        : "끌어서 남길 부분만 고르세요. 그대로 두면 전체를 씁니다."}
+                    </p>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={generating || isFullCrop(activeItem.crop)}
+                      onClick={() => updateActive({ crop: { ...FULL_CROP } })}
+                    >
+                      전체로 되돌리기
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="relative h-[19rem] overflow-hidden rounded-[10px] border bg-[repeating-conic-gradient(oklch(0.25_0_0)_0_25%,oklch(0.2_0_0)_0_50%)] bg-[length:20px_20px]">
+                  {shownUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={shownUrl}
+                      alt={`${activeItem.file.name} ${showingSource ? "원본" : "결과"} 미리보기`}
+                      className="size-full object-contain"
+                    />
+                  ) : null}
+                  <div className="absolute bottom-3.5 left-3.5 flex gap-1.5 font-mono text-[11px]">
+                    {showingSource ? (
+                      activeFacts ? (
+                        <>
+                          <span className="rounded-[7px] bg-background/85 px-2 py-1">{activeFacts.width} × {activeFacts.height}</span>
+                          <span className="rounded-[7px] bg-background/85 px-2 py-1">{formatImageBytes(activeFacts.encodedBytes)}</span>
+                        </>
+                      ) : null
+                    ) : visibleOutput ? (
+                      <>
+                        <span className="rounded-[7px] bg-background/85 px-2 py-1">{visibleOutput.width} × {visibleOutput.height}</span>
+                        <span className="rounded-[7px] bg-background/85 px-2 py-1 uppercase">
+                          {visibleOutput.format.replace("image/", "")} · {formatImageBytes(visibleOutput.bytes)}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              )}
 
               <div className="grid gap-2.5 sm:grid-cols-3">
                 <StatTile
@@ -701,7 +753,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
                 <StatTile
                   label="만들어질 파일"
                   value={plan ? `${plan.outputs.length}개` : "—"}
-                  note={plan ? `크기 ${plan.widthCount}종 · 형식 ${plan.formatCount}종` : "쓰임새를 고르면 계산됩니다"}
+                  note={plan ? `크기 ${plan.widthCount}종 · 형식 ${plan.formatCount}종` : "결과 형태를 고르면 계산됩니다"}
                 />
               </div>
             </section>
@@ -714,6 +766,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-medium">
                 올린 이미지 {items.length}개
+                {croppedCount > 0 ? <span className="ml-2 text-[11px] font-normal text-muted-foreground">{croppedCount}개 잘라둠</span> : null}
                 {inspecting ? <span className="ml-2 text-[11px] font-normal text-muted-foreground">확인하는 중…</span> : null}
               </div>
               <Button type="button" size="xs" variant="outline" disabled={generating} onClick={() => fileInputRef.current?.click()}>
@@ -732,6 +785,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
               const facts = item.inspection?.status === "ready" ? item.inspection.facts : null;
               const failure = item.inspection?.status === "failed" ? failureHelp(item.inspection.error) : null;
               const selected = activeItem?.id === item.id;
+              const cropped = !isFullCrop(item.crop);
               return (
                 <div
                   key={item.id}
@@ -756,7 +810,11 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
                         failure ? "bg-destructive/15 text-destructive" : "bg-secondary",
                       )}
                     >
-                      {failure ? <TriangleAlert className="size-3.5" aria-hidden="true" /> : null}
+                      {failure ? (
+                        <TriangleAlert className="size-3.5" aria-hidden="true" />
+                      ) : cropped ? (
+                        <CropIcon className="size-3.5 text-primary" aria-hidden="true" />
+                      ) : null}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-medium">{item.file.name}</span>
@@ -769,7 +827,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
                         {failure
                           ? failure.message
                           : facts
-                            ? `${facts.width} × ${facts.height} · ${formatImageBytes(facts.encodedBytes)} · ${DETECTED_CONTENT[facts.detectedContent]}`
+                            ? `${facts.width} × ${facts.height} · ${formatImageBytes(facts.encodedBytes)} · ${DETECTED_CONTENT[facts.detectedContent]}${cropped ? " · 잘라둠" : ""}`
                             : "확인하는 중…"}
                       </span>
                     </span>
@@ -824,7 +882,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
         <aside className="flex min-w-0 flex-col gap-3" aria-label="설정">
           <section className="flex flex-col gap-3 rounded-xl bg-card p-3.5 shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--color-primary),transparent_80%)]">
             <div>
-              <div className="text-sm font-medium">어디에 쓸 이미지인가요?</div>
+              <div className="text-sm font-medium">무엇을 만들까요?</div>
               <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
                 하나만 고르면 나머지 설정은 알아서 맞춰집니다.
               </p>
@@ -833,6 +891,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
             <div className="flex flex-col gap-2">
               {PURPOSE.map(({ value, title, detail, icon: Icon }) => {
                 const selected = profile === value;
+                const count = selected && plan ? plan.outputs.length : null;
                 return (
                   <button
                     key={value}
@@ -846,7 +905,12 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
                   >
                     <Icon className={cn("size-4", selected ? "text-primary" : "text-muted-foreground")} aria-hidden="true" />
                     <span className="min-w-0">
-                      <span className="block text-[13px] font-medium">{title}</span>
+                      <span className="block text-[13px] font-medium">
+                        {title}
+                        {value === "devices" && count !== null ? (
+                          <span className="ml-1 font-normal text-muted-foreground">(총 {count}개)</span>
+                        ) : null}
+                      </span>
                       <span className="mt-0.5 block text-[11px] leading-[1.45] text-muted-foreground">{detail}</span>
                     </span>
                     {selected ? <CircleCheck className="size-4 text-primary" aria-hidden="true" /> : <span />}
@@ -855,32 +919,39 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
               })}
             </div>
 
-            {profile === "html" ? (
+            {profile === "devices" ? (
               <div className="flex flex-col gap-2 border-t pt-3">
-                <div className="text-xs font-medium text-muted-foreground">이미지가 놓일 자리</div>
-                <Segmented label="이미지가 놓일 자리" value={layout} onChange={changeLayout} options={PLACEMENT} />
+                <div className="text-xs font-medium text-muted-foreground">만들 가로 크기</div>
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
                   가로{" "}
-                  <span className="font-mono">
-                    {(parsedWidths ?? WEB_ASSET_WIDTH_PRESETS[layout]).join(" · ")}
-                  </span>{" "}
-                  크기로 만듭니다.
+                  <span className="font-mono">{(parsedWidths ?? WEB_ASSET_DEVICE_WIDTH_LIST).join(" · ")}</span>{" "}
+                  크기로 만듭니다. 원본보다 큰 크기는 건너뜁니다.
                 </p>
               </div>
-            ) : profile === "design" && activeFacts ? (
+            ) : (
               <div className="flex flex-col gap-2 border-t pt-3">
-                <div className="text-xs font-medium text-muted-foreground">1배 기준 가로</div>
+                <div className="text-xs font-medium text-muted-foreground">이미지 크기</div>
+                <Segmented label="이미지 크기" value={targetSize} onChange={setTargetSize} options={TARGET_SIZE} />
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  가로{" "}
-                  <span className="font-mono">
-                    {resolveWebAssetWidths(activeFacts.width, { ...DEFAULT_WEB_ASSET_OPTIONS, profile: "design", designBaseWidth: parsedBaseWidth || 400 })
-                      .map(({ width }) => width)
-                      .join(" · ")}
-                  </span>{" "}
-                  크기로 만듭니다.
+                  {sourceSize && activeOptions ? (
+                    <>
+                      가로{" "}
+                      <span className="font-mono">
+                        {resolveWebAssetWidths(sourceSize.width, activeOptions)[0]?.width ?? sourceSize.width}
+                      </span>
+                      px로 내보냅니다. 원본보다 키우지는 않습니다.
+                    </>
+                  ) : (
+                    <>
+                      가로 <span className="font-mono">
+                        {targetSize === "original" ? "원본 그대로" : `${WEB_ASSET_DEVICE_WIDTHS[targetSize]}px 이하`}
+                      </span>
+                      로 내보냅니다. 원본보다 키우지는 않습니다.
+                    </>
+                  )}
                 </p>
               </div>
-            ) : null}
+            )}
           </section>
 
           <section className="flex flex-col gap-2.5 rounded-xl bg-card p-3.5 shadow-[inset_0_0_0_1px_var(--border)]">
@@ -983,7 +1054,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
                   />
                 </div>
 
-                {profile === "html" ? (
+                {profile === "devices" ? (
                   <>
                     <div className="flex flex-wrap gap-3">
                       <label className="flex items-center gap-2">
@@ -1000,28 +1071,16 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
                       <input
                         value={customWidths}
                         onChange={(event) => setCustomWidths(event.target.value)}
-                        placeholder={WEB_ASSET_WIDTH_PRESETS[layout].join(", ")}
+                        placeholder={WEB_ASSET_DEVICE_WIDTH_LIST.join(", ")}
                         aria-invalid={parsedWidths === null}
                         className="h-9 w-full rounded-lg border border-input bg-background px-3 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                     </label>
                   </>
-                ) : profile === "next" ? (
+                ) : (
                   <label className="flex items-center gap-2">
                     <input type="checkbox" checked={includePlaceholder} onChange={(event) => setIncludePlaceholder(event.target.checked)} />
                     흐릿한 미리보기(blurDataURL) 넣기
-                  </label>
-                ) : (
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-muted-foreground">1배 기준 가로</span>
-                    <input
-                      type="number"
-                      min={16}
-                      max={4096}
-                      value={designBaseWidth}
-                      onChange={(event) => setDesignBaseWidth(event.target.value)}
-                      className="h-9 w-full rounded-lg border border-input bg-background px-3 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    />
                   </label>
                 )}
 
@@ -1081,7 +1140,7 @@ export function WebAssetWorkspace({ apiKey, onUnauthorized, onNavigate }: WebAss
               type="button"
               variant="outline"
               className="w-full"
-              disabled={!plan || !activeFacts}
+              disabled={!plan}
               onClick={() => void copySnippet()}
             >
               {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}

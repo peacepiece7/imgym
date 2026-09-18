@@ -17,20 +17,18 @@ import {
   metadataArgs,
   stripPngPrivateChunks,
 } from "@/lib/raster/optimize-raster";
-import type { RasterFormat } from "@/lib/raster/types";
+import { imageMagickCropGeometry } from "@/lib/raster/crop";
+import type { NormalizedCrop, RasterFormat } from "@/lib/raster/types";
 import {
   isManualWidthSelection,
+  requestedWebAssetWidths,
   resolveWebAssetWidths,
-  WEB_ASSET_WIDTH_PRESETS,
   type ResolvedWidth,
 } from "@/lib/web-assets/options";
+import { croppedDimensions } from "@/lib/web-assets/plan";
 import { assetDirectory, safeAssetStem, webAssetPath } from "@/lib/web-assets/filename";
 import { detectRasterMetadata, inspectRasterAsset } from "@/lib/web-assets/inspect";
-import {
-  designHandoffSnippet,
-  htmlPictureSnippet,
-  nextImageSnippet,
-} from "@/lib/web-assets/snippets";
+import { htmlPictureSnippet, nextImageSnippet } from "@/lib/web-assets/snippets";
 import {
   WEB_ASSET_MANIFEST_VERSION,
   WEB_ASSET_RECIPE_ID,
@@ -89,7 +87,6 @@ interface VariantRequest {
   temporaryDirectory: string;
   internalName: string;
   zipPath: string;
-  scale?: 1 | 2 | 3;
   signal?: AbortSignal;
 }
 
@@ -276,7 +273,6 @@ async function generateVariant(request: VariantRequest): Promise<{
         height: request.height,
         bytes: data.byteLength,
         sha256: createHash("sha256").update(data).digest("hex"),
-        ...(request.scale ? { scale: request.scale } : {}),
         quality,
         metadata,
       },
@@ -287,6 +283,7 @@ async function generateVariant(request: VariantRequest): Promise<{
 async function createReference(
   source: WebAssetSource,
   sourceFormat: RasterFormat,
+  crop: NormalizedCrop | null,
   width: number,
   internalName: string,
   temporaryDirectory: string,
@@ -296,8 +293,10 @@ async function createReference(
   await runMagick([
     ...MAGICK_LIMIT_ARGS,
     `${coder}:-[0]`,
+    // Crop after -auto-orient so the region matches what the browser showed.
     "-auto-orient",
     "+repage",
+    ...(crop ? ["-crop", imageMagickCropGeometry(crop), "+repage"] : []),
     "-resize", `${width}x>`,
     "-alpha", "set",
     `miff:${internalName}`,
@@ -353,6 +352,7 @@ async function removeVariant(variant: GeneratedVariant | null) {
 async function createPlaceholder(
   source: WebAssetSource,
   sourceFormat: RasterFormat,
+  crop: NormalizedCrop | null,
   temporaryDirectory: string,
   signal?: AbortSignal,
 ) {
@@ -360,6 +360,8 @@ async function createPlaceholder(
     ...MAGICK_LIMIT_ARGS,
     `${CODER[sourceFormat]}:-[0]`,
     "-auto-orient",
+    "+repage",
+    ...(crop ? ["-crop", imageMagickCropGeometry(crop), "+repage"] : []),
     "-thumbnail", "16x16>",
     "-colorspace", "sRGB",
     "+profile", "*",
@@ -379,27 +381,26 @@ async function generateOne(
 ): Promise<{ item: WebAssetManifestItem; entries: ZipEntry[] }> {
   const facts = await inspectRasterAsset(source.data, source.name, source.mime, signal);
   const content = selectedContent(options, facts.detectedContent);
-  const widths = resolveWebAssetWidths(facts.width, options);
+  // Everything downstream measures the cropped image, not the uploaded one.
+  const cropped = croppedDimensions(facts, options);
+  const widths = resolveWebAssetWidths(cropped.width, options);
   const stem = safeAssetStem(source.name);
   const references = new Map<number, string>();
   const referenceFor = async (width: number) => {
     const existing = references.get(width);
     if (existing) return existing;
     const name = `reference-${index}-${width}.miff`;
-    const reference = await createReference(source, facts.format, width, name, temporaryDirectory, signal);
+    const reference = await createReference(
+      source, facts.format, options.crop, width, name, temporaryDirectory, signal,
+    );
     references.set(width, reference);
     return reference;
   };
   const warnings = [...facts.warnings];
   const pruned: PrunedCandidate[] = [];
   const fallbackFormat = preferredFallback(content, facts.hasAlpha);
-  const requestedWidths = options.profile === "html"
-    ? options.customWidths ?? WEB_ASSET_WIDTH_PRESETS[options.layout]
-    : options.profile === "design"
-      ? [1, 2, 3].map((scale) => options.designBaseWidth * scale)
-      : [];
-  for (const requestedWidth of requestedWidths) {
-    if (requestedWidth > facts.width) {
+  for (const requestedWidth of requestedWebAssetWidths(options)) {
+    if (requestedWidth > cropped.width) {
       pruned.push({ format: fallbackFormat, width: requestedWidth, reason: "no-upscale" });
     }
   }
@@ -413,7 +414,7 @@ async function generateOne(
     }
     for (const [variantIndex, width] of requested.entries()) {
       signal?.throwIfAborted();
-      const dimensions = dimensionsForWidth(facts.width, facts.height, width.width);
+      const dimensions = dimensionsForWidth(cropped.width, cropped.height, width.width);
       const generated = await generateVariant({
         sourceMetadata: facts.metadata,
         ...(facts.format === "png" && options.colorPolicy === "preserve"
@@ -427,8 +428,7 @@ async function generateOne(
         options,
         temporaryDirectory,
         internalName: `output-${index}-${format}-${width.width}-${variantIndex}.${format === "jpeg" ? "jpg" : format}`,
-        zipPath: webAssetPath(directory, stem, width.width, format, width.scale),
-        ...(width.scale ? { scale: width.scale } : {}),
+        zipPath: webAssetPath(directory, stem, width.width, format),
         signal,
       });
       if (!generated.variant) {
@@ -441,11 +441,12 @@ async function generateOne(
     return variants;
   };
 
-  let fallback = await createForWidths(fallbackFormat, widths, options.profile === "next" ? "next-source" : options.profile === "design" ? "design-scale" : "fallback");
+  const basePurpose: WebAssetOutput["purpose"] = options.profile === "single" ? "single" : "fallback";
+  let fallback = await createForWidths(fallbackFormat, widths, basePurpose);
   if (fallback.length !== widths.length && fallbackFormat !== "png") {
     await Promise.all(fallback.map(removeVariant));
     warnings.push("JPEG fallback이 품질 기준을 통과하지 못해 무손실 PNG fallback으로 바꿨습니다.");
-    fallback = await createForWidths("png", widths, options.profile === "next" ? "next-source" : options.profile === "design" ? "design-scale" : "fallback");
+    fallback = await createForWidths("png", widths, basePurpose);
   }
   if (fallback.length !== widths.length) {
     throw new Error(`No quality-safe fallback could be generated: ${JSON.stringify(pruned)}`);
@@ -453,7 +454,7 @@ async function generateOne(
 
   let keptFallback = fallback;
   let keptWidths = widths;
-  if (options.profile === "html" && !isManualWidthSelection(options)) {
+  if (options.profile === "devices" && !isManualWidthSelection(options)) {
     const result = pruneAutomaticWidths(fallback, widths);
     keptFallback = result.kept;
     keptWidths = result.keptWidths;
@@ -463,7 +464,7 @@ async function generateOne(
   }
 
   const variants = [...keptFallback];
-  if (options.profile === "html") {
+  if (options.profile === "devices") {
     for (const [format, enabled] of [["webp", options.includeWebp], ["avif", options.includeAvif]] as const) {
       if (!enabled) continue;
       try {
@@ -489,16 +490,14 @@ async function generateOne(
   }
 
   let placeholder: string | undefined;
-  if (options.profile === "next" && options.includePlaceholder) {
-    placeholder = await createPlaceholder(source, facts.format, temporaryDirectory, signal);
+  if (options.profile === "single" && options.includePlaceholder) {
+    placeholder = await createPlaceholder(source, facts.format, options.crop, temporaryDirectory, signal);
   }
   const outputs = variants.map(({ output }) => output);
-  const snippet = options.profile === "html"
+  const snippet = options.profile === "devices"
     ? htmlPictureSnippet(outputs, options)
-    : options.profile === "next"
-      ? nextImageSnippet(outputs[0], options, placeholder)
-      : designHandoffSnippet(facts, outputs, options);
-  const snippetExtension = options.profile === "html" ? "html" : options.profile === "next" ? "tsx" : "json";
+    : nextImageSnippet(outputs[0], options, placeholder);
+  const snippetExtension = options.profile === "devices" ? "html" : "tsx";
   const snippetPath = `code-${directory}.${snippetExtension}`;
   const entries: ZipEntry[] = [
     ...variants.map(({ output, filePath }) => ({ name: output.path, path: filePath } as const)),
@@ -512,6 +511,7 @@ async function generateOne(
       sourceName: source.name,
       directory,
       input: facts,
+      ...(options.crop ? { crop: options.crop } : {}),
       resolvedContent: content,
       outputs,
       pruned,
@@ -548,6 +548,7 @@ export async function generateWebAssetPack(
         ...options,
         altKind: accessibility.kind,
         altText: accessibility.text,
+        crop: options.crops?.[index] ?? options.crop,
       };
       const generated = await generateOne(source, index, directory, itemOptions, temporaryDirectory, signal);
       items.push(generated.item);
@@ -580,13 +581,13 @@ export async function generateWebAssetPack(
     recipe: {
       id: WEB_ASSET_RECIPE_ID,
       profile: options.profile,
-      layout: options.layout,
       customWidths: options.customWidths ?? null,
-      designBaseWidth: options.designBaseWidth,
+      targetSize: options.targetSize,
       sizes: options.sizes,
       contentHint: options.contentHint,
       colorPolicy: options.colorPolicy,
       accessibility: "per-asset",
+      crops: "per-asset",
       loading: options.loading,
       formats: { webp: options.includeWebp, avif: options.includeAvif },
       includePlaceholder: options.includePlaceholder,

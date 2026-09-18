@@ -1,10 +1,13 @@
-import type { RasterFormat } from "@/lib/raster/types";
+import type { NormalizedCrop, RasterFormat } from "@/lib/raster/types";
 
-export const WEB_ASSET_RECIPE_ID = "ohmyimg-web-assets-r1";
-export const WEB_ASSET_MANIFEST_VERSION = "ohmyimg.web-assets-manifest.v1";
+export const WEB_ASSET_RECIPE_ID = "ohmyimg-web-assets-r2";
+export const WEB_ASSET_MANIFEST_VERSION = "ohmyimg.web-assets-manifest.v2";
 
-export type WebAssetProfile = "html" | "next" | "design";
-export type WebAssetLayout = "hero" | "content" | "card";
+/** "devices" fans one source out across device widths and formats; "single" keeps one file. */
+export type WebAssetProfile = "devices" | "single";
+export type WebAssetDevice = "mobile" | "tablet" | "desktop";
+/** What a "single" output is scaled down to; "original" leaves the cropped size alone. */
+export type WebAssetTargetSize = WebAssetDevice | "original";
 export type WebAssetContentHint = "auto" | "photo" | "ui" | "logo" | "transparent";
 export type ResolvedContentHint = Exclude<WebAssetContentHint, "auto">;
 export type WebAssetColorPolicy = "preserve" | "srgb";
@@ -19,9 +22,14 @@ export interface WebAssetAccessibility {
 
 export interface WebAssetOptions {
   profile: WebAssetProfile;
-  layout: WebAssetLayout;
+  /** "devices" only: overrides the device widths when the caller wants its own. */
   customWidths?: number[];
-  designBaseWidth: number;
+  /** "single" only. */
+  targetSize: WebAssetTargetSize;
+  /** The crop for the asset being generated; null keeps the whole image. */
+  crop: NormalizedCrop | null;
+  /** Per-asset crops, positional like accessibility; falls back to crop. */
+  crops?: (NormalizedCrop | null)[];
   sizes: string;
   contentHint: WebAssetContentHint;
   colorPolicy: WebAssetColorPolicy;
@@ -85,14 +93,13 @@ export interface AssetQuality {
 
 export interface WebAssetOutput {
   path: string;
-  purpose: "fallback" | "modern" | "next-source" | "design-scale";
+  purpose: "fallback" | "modern" | "single";
   format: WebAssetFormat;
   mime: string;
   width: number;
   height: number;
   bytes: number;
   sha256: string;
-  scale?: 1 | 2 | 3;
   quality: AssetQuality;
   metadata: AssetMetadataFacts;
 }
@@ -110,6 +117,8 @@ export interface WebAssetManifestItem {
   sourceName: string;
   directory?: string;
   input?: AssetFacts;
+  /** The crop applied before resizing, in normalized source coordinates. */
+  crop?: NormalizedCrop;
   resolvedContent?: ResolvedContentHint;
   outputs?: WebAssetOutput[];
   pruned?: PrunedCandidate[];
@@ -125,13 +134,13 @@ export interface WebAssetManifest {
   recipe: {
     id: typeof WEB_ASSET_RECIPE_ID;
     profile: WebAssetProfile;
-    layout: WebAssetLayout;
     customWidths: number[] | null;
-    designBaseWidth: number;
+    targetSize: WebAssetTargetSize;
     sizes: string;
     contentHint: WebAssetContentHint;
     colorPolicy: WebAssetColorPolicy;
     accessibility: "per-asset";
+    crops: "per-asset";
     loading: WebAssetLoadingIntent;
     formats: { webp: boolean; avif: boolean };
     includePlaceholder: boolean;
