@@ -7,6 +7,12 @@ export interface ApiFieldDoc {
   description: string;
 }
 
+export interface ApiOptionExample {
+  /** Names the variant, e.g. the recipe this options object selects. */
+  label: string;
+  options: string;
+}
+
 export interface ApiEndpointDoc {
   id: string;
   method: "GET" | "POST";
@@ -20,7 +26,8 @@ export interface ApiEndpointDoc {
   responseDescription: string;
   limits: string[];
   responseHeaders: string[];
-  example?: string;
+  /** Every one of these is asserted against the endpoint's real parser. */
+  examples?: readonly ApiOptionExample[];
   curl: string;
 }
 
@@ -80,7 +87,8 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
     responseDescription: "생성 이미지, 대상별 코드, 결정 기록이 담긴 manifest.json을 스트리밍합니다.",
     limits: ["1–10개", "파일당 10 MiB", "요청 전체 50 MiB", "ZIP 최대 260개 엔트리 / 128 MiB"],
     responseHeaders: ["X-Asset-Succeeded", "X-Asset-Failed", "X-Output-Files", "X-Output-Bytes", "X-Processing-Ms"],
-    example: `{
+    examples: [
+    { label: "devices · 기기별 포맷", options: `{
   "profile": "devices",
   "targetSize": "original",
   "crop": null,
@@ -93,7 +101,27 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
   "includeWebp": true,
   "includeAvif": true,
   "includePlaceholder": true
-}`,
+}` },
+    { label: "single · 원본 한 장 + 크롭", options: `{
+  "profile": "single",
+  "targetSize": "mobile",
+  "crop": {
+    "x": 0.25,
+    "y": 0.25,
+    "width": 0.5,
+    "height": 0.5
+  },
+  "sizes": "100vw",
+  "contentHint": "photo",
+  "colorPolicy": "preserve",
+  "altKind": "informative",
+  "altText": "해 질 녘의 산 능선",
+  "loading": "lcp",
+  "includeWebp": false,
+  "includeAvif": false,
+  "includePlaceholder": true
+}` },
+    ],
     curl: `curl --fail-with-body \\\n  ${AUTH} \\\n  -F images=@hero.png \\\n  -F 'options={"profile":"devices","targetSize":"original","crop":null,"sizes":"(max-width: 640px) 100vw, (max-width: 1024px) 100vw, 1920px","contentHint":"auto","colorPolicy":"preserve","altKind":"informative","altText":"Mountain at sunset","loading":"lazy","includeWebp":true,"includeAvif":true,"includePlaceholder":true}' \\\n  -o web-assets.zip \\\n  ${BASE}/api/v1/web-assets`,
   },
   {
@@ -112,9 +140,13 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
     responseDescription: "생성 파일과 버전이 명시된 manifest.json을 ZIP으로 스트리밍합니다.",
     limits: ["파일 1개", "최대 20 MiB", "recipe: frame · icons · palette · social · heic · background · watermark"],
     responseHeaders: ["X-Output-Files", "X-Output-Bytes"],
-    example: `{
+    examples: [
+      { label: "frame · 비율 크롭", options: `{
   "recipe": "frame",
-  "aspects": ["1:1", "16:9"],
+  "aspects": [
+    "1:1",
+    "16:9"
+  ],
   "focusX": 50,
   "focusY": 42,
   "rotate": 0,
@@ -123,7 +155,42 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
   "trim": false,
   "padding": 0,
   "background": "#ffffff"
-}`,
+}` },
+      { label: "icons · 파비콘·앱 아이콘", options: `{
+  "recipe": "icons",
+  "background": "#ffffff",
+  "padding": 12,
+  "includeNative": false
+}` },
+      { label: "palette · 색 추출", options: `{
+  "recipe": "palette",
+  "colors": 5,
+  "background": "#ffffff"
+}` },
+      { label: "social · OG 카드", options: `{
+  "recipe": "social",
+  "title": "제품 업데이트",
+  "subtitle": "2026년 9월",
+  "alt": "제품 업데이트 공유 카드",
+  "background": "#111827",
+  "textColor": "#ffffff"
+}` },
+      { label: "background · 배경 제거", options: `{
+  "recipe": "background",
+  "color": "#ffffff",
+  "fuzz": 10
+}` },
+      { label: "watermark · 워터마크", options: `{
+  "recipe": "watermark",
+  "text": "@peacepiece",
+  "position": "southeast",
+  "opacity": 40,
+  "color": "#ffffff"
+}` },
+      { label: "heic · HEIC 입력 변환", options: `{
+  "recipe": "heic"
+}` },
+    ],
     curl: `curl --fail-with-body \\\n  ${AUTH} \\\n  -F asset=@product.png \\\n  -F 'options={"recipe":"icons","background":"#ffffff","padding":12,"includeNative":false}' \\\n  -o icons-asset-recipe.zip \\\n  ${BASE}/api/v1/asset-recipes`,
   },
   {
@@ -142,12 +209,18 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
     responseDescription: "영상·포스터·HTML 또는 WOFF2·CSS·권리 확인 기록을 ZIP으로 반환합니다.",
     limits: ["파일 1개", "최대 20 MiB", "GIF 최대 30초 / 30fps", "글꼴 text 최대 5,000자"],
     responseHeaders: ["X-Output-Files"],
-    example: `{
+    examples: [
+      { label: "gif-video · GIF를 영상으로", options: `{
+  "recipe": "gif-video",
+  "background": "#ffffff"
+}` },
+      { label: "font · 폰트 서브셋", options: `{
   "recipe": "font",
-  "family": "Project Sans",
-  "text": "ABC 123 가나다",
+  "family": "Pretendard",
+  "text": "안녕하세요 Oh My Img",
   "licenseConfirmed": true
-}`,
+}` },
+    ],
     curl: `curl --fail-with-body \\\n  ${AUTH} \\\n  -F asset=@motion.gif \\\n  -F 'options={"recipe":"gif-video","background":"#ffffff"}' \\\n  -o gif-video-recipe.zip \\\n  ${BASE}/api/v1/media-recipes`,
   },
   {
@@ -166,12 +239,36 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
     responseDescription: "입력과 같은 포맷의 최적화된 이미지 바이너리를 반환합니다.",
     limits: ["최대 10 MiB", "한 변 8,192 px", "최대 25 MP", "애니메이션 제외"],
     responseHeaders: ["X-Original-Bytes", "X-Output-Bytes", "X-Output-Width", "X-Output-Height", "X-Selected-Preset", "X-Processing-Ms"],
-    example: `{
-  "crop": { "x": 0, "y": 0, "width": 1, "height": 1 },
-  "resize": { "maxWidth": 1600 },
+    examples: [
+      { label: "auto · 기준을 만족하는 최소 용량", options: `{
+  "crop": {
+    "x": 0,
+    "y": 0,
+    "width": 1,
+    "height": 1
+  },
+  "resize": {
+    "maxWidth": 1600
+  },
   "mode": "auto",
-  "optimization": { "policy": "standard" }
-}`,
+  "optimization": {
+    "policy": "standard"
+  }
+}` },
+      { label: "balanced · 고정 프리셋 + 크롭", options: `{
+  "crop": {
+    "x": 0.1,
+    "y": 0.1,
+    "width": 0.8,
+    "height": 0.8
+  },
+  "resize": {
+    "maxWidth": 1200,
+    "maxHeight": 1200
+  },
+  "mode": "balanced"
+}` },
+    ],
     curl: `curl --fail-with-body \\\n  ${AUTH} \\\n  -F image=@photo.jpg \\\n  -F 'options={"crop":{"x":0,"y":0,"width":1,"height":1},"resize":{"maxWidth":1600},"mode":"auto","optimization":{"policy":"standard"}}' \\\n  -o photo-optimized.jpg \\\n  ${BASE}/api/v1/optimize-raster`,
   },
   {
@@ -191,12 +288,17 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
     responseDescription: "SVG 문자열, 다운로드 이름, 입출력 크기, 처리 시간, 선택 후보와 SVG 복잡도 통계를 반환합니다.",
     limits: ["최대 10 MiB", "한 변 8,192 px", "최대 40 MP", "애니메이션 제외"],
     responseHeaders: ["X-Request-Id"],
-    example: `{
+    examples: [
+      { label: "cleanup · 수동 프리셋 전처리", options: `{
   "version": 1,
   "cleanup": 2,
   "colors": 64,
-  "advanced": { "alphaCutoff": 16, "gradientStep": 32 }
-}`,
+  "advanced": {
+    "alphaCutoff": 16,
+    "gradientStep": 32
+  }
+}` },
+    ],
     curl: `curl --fail-with-body \\\n  ${AUTH} \\\n  -F image=@logo.png \\\n  -F preset=balanced \\\n  -F 'cleanup={"version":1,"cleanup":2,"colors":64}' \\\n  ${BASE}/api/v1/vectorize`,
   },
   {
@@ -234,14 +336,24 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
     responseDescription: "다운로드 가능한 PDF/UA-1 바이너리와 렌더링 측정 헤더를 반환합니다.",
     limits: ["Markdown 최대 1 MiB", "최대 100페이지", "PDF 최대 24 MiB", "렌더링 제한 45초"],
     responseHeaders: ["X-Input-Bytes", "X-Output-Bytes", "X-Output-Pages", "X-Processing-Ms", "X-PDF-Renderer", "X-PDF-Variant"],
-    example: `{
+    examples: [
+      { label: "document · 일반 문서", options: `{
   "title": "제품 가이드",
   "lang": "ko",
   "pageSize": "a4",
   "orientation": "portrait",
   "template": "document",
   "includePageNumbers": true
-}`,
+}` },
+      { label: "resume · 이력서 템플릿", options: `{
+  "title": "이력서",
+  "lang": "ko",
+  "pageSize": "a4",
+  "orientation": "portrait",
+  "template": "resume",
+  "includePageNumbers": false
+}` },
+    ],
     curl: `curl --fail-with-body \\\n  ${AUTH} \\\n  -F document=@guide.md \\\n  -F 'options={"title":"Product guide","lang":"en","pageSize":"a4","orientation":"portrait","template":"document","includePageNumbers":true}' \\\n  -o guide.pdf \\\n  ${BASE}/api/v1/docs-to-pdf`,
   },
 ] as const;

@@ -166,7 +166,11 @@ function EndpointCard({ endpoint, baseUrl }: { endpoint: ApiEndpointDoc; baseUrl
             ) : (
               <div className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-xs text-stone-400">요청 본문과 인증이 필요하지 않습니다.</div>
             )}
-            {endpoint.example ? <div className="mt-3"><CodeBlock code={endpoint.example} label="options · JSON before serialization" /></div> : null}
+            {endpoint.examples?.map((example) => (
+              <div key={example.label} className="mt-3">
+                <CodeBlock code={example.options} label={`options · ${example.label}`} />
+              </div>
+            ))}
           </section>
 
           <section aria-labelledby={`${endpoint.id}-response`}>

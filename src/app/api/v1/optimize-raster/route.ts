@@ -1,15 +1,10 @@
 import { jobBusyResponse, tryAcquireJobPermit } from "@/lib/api/job-gate";
 import { requireApiAccess } from "@/lib/api/access";
 import { parseBoundedMultipartFormData } from "@/lib/api/multipart";
-import { parseNormalizedCrop, parseRasterResize } from "@/lib/raster/crop";
 import { toOptimizedFilename } from "@/lib/raster/filename";
+import { parseOptimizeRasterOptions } from "@/lib/raster/options";
 import { AUTO_QUALITY_GATE, optimizeRaster } from "@/lib/raster/optimize-raster";
-import { isRasterMode, isRasterOptimizationPolicy } from "@/lib/raster/presets";
-import type {
-  OptimizeRasterOptions,
-  RasterFormat,
-  RasterOptimizationPolicy,
-} from "@/lib/raster/types";
+import type { RasterFormat } from "@/lib/raster/types";
 import { RASTER_LIMITS, validateRaster } from "@/lib/raster/validate-raster";
 
 export const runtime = "nodejs";
@@ -25,30 +20,6 @@ function responseHeaders(requestId: string) {
     "Cache-Control": "no-store",
     "X-Request-Id": requestId,
   };
-}
-
-function parseOptions(value: FormDataEntryValue | null): OptimizeRasterOptions | null {
-  if (typeof value !== "string") return null;
-  let candidate: unknown;
-  try {
-    candidate = JSON.parse(value);
-  } catch {
-    return null;
-  }
-  if (!candidate || typeof candidate !== "object") return null;
-  const raw = candidate as Record<string, unknown>;
-  const crop = parseNormalizedCrop(raw.crop);
-  const resize = parseRasterResize(raw.resize);
-  if (!crop || !resize || !isRasterMode(raw.mode)) return null;
-  let policy: RasterOptimizationPolicy = "standard";
-  if (raw.optimization !== undefined) {
-    if (!raw.optimization || typeof raw.optimization !== "object") return null;
-    const optimization = raw.optimization as Record<string, unknown>;
-    if (!isRasterOptimizationPolicy(optimization.policy)) return null;
-    policy = optimization.policy;
-  }
-  if (raw.mode !== "auto" && policy !== "standard") return null;
-  return { crop, resize, mode: raw.mode, optimization: { policy } };
 }
 
 export async function POST(request: Request) {
@@ -76,7 +47,7 @@ export async function POST(request: Request) {
     }
     const formData = formResult.formData;
     const file = formData.get("image");
-    const options = parseOptions(formData.get("options"));
+    const options = parseOptimizeRasterOptions(formData.get("options"));
     if (!(file instanceof File) || !options) {
       return Response.json(
         { error: "Invalid request" },
