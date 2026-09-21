@@ -106,7 +106,7 @@ chmod +x ~/.local/bin/imgym-auto-deploy
   echo '* * * * * flock -n /tmp/imgym-deploy.lock $HOME/.local/bin/imgym-auto-deploy' ) | crontab -
 ```
 
-`flock`이 배포가 겹치는 것을 막습니다. 빌드가 1분을 넘겨도 다음 cron은 그냥
+이 경로는 2026-09-21 푸시 한 번으로 끝까지 검증했습니다. `flock`이 배포가 겹치는 것을 막습니다. 빌드가 1분을 넘겨도 다음 cron은 그냥
 건너뜁니다.
 
 ### 알아둘 점
