@@ -58,7 +58,7 @@ describe("documented API examples", () => {
     // Stub curl so the actual copied shell text is exercised without uploads,
     // network calls or the owner's key. Each argument is captured losslessly.
     const output = execFileSync("sh", ["-c", `curl() { printf '%s\\000' "$@"; };\n${endpoint.curl}`], {
-      env: { BASE_URL: base, OHMYIMG_API_KEY: "documentation-test-key", PATH: process.env.PATH },
+      env: { NODE_ENV: "test", BASE_URL: base, OHMYIMG_API_KEY: "documentation-test-key", PATH: process.env.PATH },
       encoding: "utf8",
     });
     const args = output.split("\0").slice(0, -1);
