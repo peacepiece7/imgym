@@ -1,22 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { API_ENDPOINTS, INTERNAL_API_ROUTES } from "@/lib/api/docs";
+import { readdirSync } from "node:fs";
+import { API_ENDPOINTS } from "@/lib/api/docs";
 import { OPENAPI_DOCUMENT } from "@/lib/api/openapi";
 
 describe("OpenAPI document", () => {
-  it("documents every curated endpoint and excludes UI-only previews", () => {
+  it("documents every deployed API route, including previews and the specification", () => {
     expect(Object.keys(OPENAPI_DOCUMENT.paths).sort()).toEqual(
       API_ENDPOINTS.map(({ path }) => path).sort(),
     );
-    for (const route of INTERNAL_API_ROUTES) {
-      expect(OPENAPI_DOCUMENT.paths).not.toHaveProperty(route);
-    }
+    const routes = readdirSync("src/app/api", { recursive: true })
+      .filter((path) => typeof path === "string" && path.endsWith("/route.ts"))
+      .map((path) => `/api/${String(path).replace(/\/route\.ts$/, "")}`);
+    expect(Object.keys(OPENAPI_DOCUMENT.paths).sort()).toEqual(routes.sort());
   });
 
   it("keeps health public and protects every conversion operation", () => {
     expect(OPENAPI_DOCUMENT.paths["/api/health"].get.security).toEqual([]);
 
     for (const endpoint of API_ENDPOINTS.filter(({ method }) => method === "POST")) {
-      const path = endpoint.path as Exclude<keyof typeof OPENAPI_DOCUMENT.paths, "/api/health">;
+      const path = endpoint.path as Exclude<keyof typeof OPENAPI_DOCUMENT.paths, "/api/health" | "/api/openapi">;
       const operation = OPENAPI_DOCUMENT.paths[path].post;
       expect(operation.security).toEqual([{ bearerAuth: [] }]);
       expect(operation.requestBody.content).toHaveProperty("multipart/form-data");

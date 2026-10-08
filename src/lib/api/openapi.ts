@@ -1,4 +1,5 @@
-import { API_REFERENCE_VERSION } from "@/lib/api/docs";
+import { API_ENDPOINTS, API_REFERENCE_VERSION } from "@/lib/api/docs";
+import { OPTION_SCHEMAS } from "@/lib/api/option-schemas";
 
 const bearerSecurity = [{ bearerAuth: [] }];
 
@@ -25,7 +26,10 @@ const errorResponse = (description: string) => ({
 
 const protectedErrors = {
   "400": errorResponse("요청 또는 옵션이 올바르지 않음"),
-  "401": errorResponse("Bearer API 키가 없거나 올바르지 않음"),
+  "401": {
+    ...errorResponse("Bearer API 키가 없거나 올바르지 않음"),
+    headers: { ...commonHeaders, "WWW-Authenticate": { schema: { type: "string", const: 'Bearer realm="ohmyimg-api"' } } },
+  },
   "413": errorResponse("업로드 또는 전체 요청이 허용 크기를 초과함"),
   "422": errorResponse("요청은 유효하지만 처리 가능한 결과를 만들 수 없음"),
   "429": {
@@ -39,11 +43,28 @@ const protectedErrors = {
   "503": errorResponse("서버 API 키 설정이 없거나 올바르지 않음"),
 };
 
-const jsonString = (description: string, example: string) => ({
+const jsonString = (schema: string, path: string) => ({
   type: "string",
-  description,
+  description: `${schema}를 JSON 직렬화한 multipart 문자열. 객체 스키마는 contentSchema를 참고하세요.`,
   contentMediaType: "application/json",
-  examples: [example],
+  contentSchema: { $ref: `#/components/schemas/${schema}` },
+  examples: API_ENDPOINTS.find((endpoint) => endpoint.path === path)?.examples?.map(({ options }) => JSON.stringify(JSON.parse(options))) ?? [],
+});
+
+const successHeaders = (path: string) => ({
+  ...commonHeaders,
+  ...Object.fromEntries((API_ENDPOINTS.find((endpoint) => endpoint.path === path)?.responseHeaders ?? [])
+    .map((header) => header.split(": "))
+    .map(([name, value]) => [name, { schema: value ? { type: "string", const: value } : { type: "string" } }])),
+});
+
+const previewResponse = (path: string) => ({
+  "200": {
+    description: "대표 이미지 바이너리; ZIP은 별도 생성 요청으로 받습니다.",
+    headers: { ...successHeaders(path), "Content-Disposition": { schema: { type: "string" } } },
+    content: Object.fromEntries(["image/png", "image/jpeg", "image/webp"].map((mime) => [mime, { schema: { type: "string", format: "binary" } }])),
+  },
+  ...protectedErrors,
 });
 
 const multipart = (properties: Record<string, unknown>, required: string[]) => ({
@@ -72,7 +93,7 @@ export const OPENAPI_DOCUMENT = {
     title: "Oh My Img! API",
     version: API_REFERENCE_VERSION,
     summary: "이미지·에셋·문서 변환을 위한 동기식 HTTP API",
-    description: "모든 변환은 multipart/form-data로 요청하며 결과를 영구 저장하지 않습니다. preview 라우트는 내장 UI 전용이므로 공개 계약에서 제외합니다.",
+    description: "미리보기를 포함한 모든 변환 API를 HTTPS 연결 가능한 서버에서 Bearer 키로 호출합니다. 모든 변환은 multipart/form-data로 요청하며 결과를 영구 저장하지 않습니다. 서버 간 요청은 CORS 설정이 필요하지 않습니다.",
   },
   servers: [
     { url: "/imgym", description: "현재 호스트의 imgym basePath" },
@@ -105,6 +126,18 @@ export const OPENAPI_DOCUMENT = {
         },
       },
     },
+    "/api/openapi": {
+      get: {
+        tags: ["System"], operationId: "getOpenApi", summary: "OpenAPI 명세 다운로드", security: [],
+        responses: {
+          "200": {
+            description: "현재 API 전체의 OpenAPI 3.1 명세",
+            headers: { "Cache-Control": { schema: { type: "string", const: "public, max-age=300" } } },
+            content: { "application/json": { schema: { type: "object" } } },
+          },
+        },
+      },
+    },
     "/api/v1/inspect-assets": {
       post: {
         tags: ["Inspect"],
@@ -122,7 +155,7 @@ export const OPENAPI_DOCUMENT = {
         responses: {
           "200": {
             description: "파일별 검사 결과",
-            headers: commonHeaders,
+            headers: successHeaders("/api/v1/inspect-assets"),
             content: { "application/json": { schema: { $ref: "#/components/schemas/AssetInspectionResponse" } } },
           },
           ...protectedErrors,
@@ -142,19 +175,26 @@ export const OPENAPI_DOCUMENT = {
             maxItems: 10,
             items: file("정적 PNG, JPEG 또는 WebP"),
           },
-          options: jsonString(
-            "WebAssetOptions를 JSON 직렬화한 문자열",
-            '{"profile":"devices","targetSize":"original","crop":null,"sizes":"(max-width: 640px) 100vw, (max-width: 1024px) 100vw, 1920px","contentHint":"auto","colorPolicy":"preserve","altKind":"informative","altText":"Mountain at sunset","loading":"lazy","includeWebp":true,"includeAvif":true,"includePlaceholder":true}',
-          ),
+          options: jsonString("WebAssetOptions", "/api/v1/web-assets"),
         }, ["images", "options"]),
         responses: {
           "200": {
             description: "이미지, 코드와 manifest.json을 담은 ZIP",
-            headers: commonHeaders,
+            headers: successHeaders("/api/v1/web-assets"),
             content: { "application/zip": { schema: { type: "string", format: "binary" } } },
           },
           ...protectedErrors,
         },
+      },
+    },
+    "/api/v1/web-assets/preview": {
+      post: {
+        tags: ["Build"], operationId: "previewWebAssetPack", summary: "웹 에셋 미리보기", security: bearerSecurity,
+        requestBody: multipart({
+          images: file("정적 PNG, JPEG 또는 WebP 정확히 한 장, 최대 10 MiB"),
+          options: jsonString("WebAssetOptions", "/api/v1/web-assets/preview"),
+        }, ["images", "options"]),
+        responses: previewResponse("/api/v1/web-assets/preview"),
       },
     },
     "/api/v1/asset-recipes": {
@@ -165,19 +205,26 @@ export const OPENAPI_DOCUMENT = {
         security: bearerSecurity,
         requestBody: multipart({
           asset: file("레시피에 맞는 이미지 또는 HEIC"),
-          options: jsonString(
-            "frame, icons, palette, social, heic, background, watermark 중 하나",
-            '{"recipe":"icons","background":"#ffffff","padding":12,"includeNative":false}',
-          ),
+          options: jsonString("AssetRecipeOptions", "/api/v1/asset-recipes"),
         }, ["asset", "options"]),
         responses: {
           "200": {
             description: "산출물과 manifest.json을 담은 ZIP",
-            headers: commonHeaders,
+            headers: successHeaders("/api/v1/asset-recipes"),
             content: { "application/zip": { schema: { type: "string", format: "binary" } } },
           },
           ...protectedErrors,
         },
+      },
+    },
+    "/api/v1/asset-recipes/preview": {
+      post: {
+        tags: ["Build"], operationId: "previewAssetRecipe", summary: "에셋 레시피 미리보기", security: bearerSecurity,
+        requestBody: multipart({
+          asset: file("레시피에 맞는 이미지 또는 HEIC, 최대 20 MiB"),
+          options: jsonString("AssetRecipeOptions", "/api/v1/asset-recipes/preview"),
+        }, ["asset", "options"]),
+        responses: previewResponse("/api/v1/asset-recipes/preview"),
       },
     },
     "/api/v1/media-recipes": {
@@ -188,15 +235,12 @@ export const OPENAPI_DOCUMENT = {
         security: bearerSecurity,
         requestBody: multipart({
           asset: file("GIF 또는 TTF/OTF/TTC/WOFF/WOFF2"),
-          options: jsonString(
-            "gif-video 또는 font 레시피",
-            '{"recipe":"gif-video","background":"#ffffff"}',
-          ),
+          options: jsonString("MediaRecipeOptions", "/api/v1/media-recipes"),
         }, ["asset", "options"]),
         responses: {
           "200": {
             description: "웹 영상 세트 또는 글꼴 서브셋 ZIP",
-            headers: commonHeaders,
+            headers: successHeaders("/api/v1/media-recipes"),
             content: { "application/zip": { schema: { type: "string", format: "binary" } } },
           },
           ...protectedErrors,
@@ -211,15 +255,12 @@ export const OPENAPI_DOCUMENT = {
         security: bearerSecurity,
         requestBody: multipart({
           image: file("정적 PNG, JPEG 또는 WebP"),
-          options: jsonString(
-            "OptimizeRasterOptions를 JSON 직렬화한 문자열",
-            '{"crop":{"x":0,"y":0,"width":1,"height":1},"resize":{"maxWidth":1600},"mode":"auto","optimization":{"policy":"standard"}}',
-          ),
+          options: jsonString("OptimizeRasterOptions", "/api/v1/optimize-raster"),
         }, ["image", "options"]),
         responses: {
           "200": {
             description: "입력과 같은 포맷의 최적화된 이미지",
-            headers: commonHeaders,
+            headers: successHeaders("/api/v1/optimize-raster"),
             content: {
               "image/png": { schema: { type: "string", format: "binary" } },
               "image/jpeg": { schema: { type: "string", format: "binary" } },
@@ -239,15 +280,12 @@ export const OPENAPI_DOCUMENT = {
         requestBody: multipart({
           image: file("정적 PNG, JPEG 또는 WebP"),
           preset: { type: "string", enum: ["accurate", "balanced", "tiny", "auto"] },
-          cleanup: jsonString(
-            "수동 프리셋 전용 VectorCleanupOptionsV1. auto에서는 보내지 않습니다.",
-            '{"version":1,"cleanup":2,"colors":64}',
-          ),
+          cleanup: jsonString("VectorCleanupOptionsV1", "/api/v1/vectorize"),
         }, ["image", "preset"]),
         responses: {
           "200": {
             description: "SVG와 입출력·품질·복잡도 측정값",
-            headers: commonHeaders,
+            headers: successHeaders("/api/v1/vectorize"),
             content: { "application/json": { schema: { $ref: "#/components/schemas/VectorizeResult" } } },
           },
           ...protectedErrors,
@@ -267,7 +305,7 @@ export const OPENAPI_DOCUMENT = {
         responses: {
           "200": {
             description: "안전하게 정리한 SVG와 최적화 통계",
-            headers: commonHeaders,
+            headers: successHeaders("/api/v1/optimize-svg"),
             content: { "application/json": { schema: { $ref: "#/components/schemas/DirectSvgResult" } } },
           },
           ...protectedErrors,
@@ -289,10 +327,7 @@ export const OPENAPI_DOCUMENT = {
                 properties: {
                   document: file("UTF-8 .md, .markdown 또는 .txt"),
                   markdown: { type: "string", maxLength: 1048576 },
-                  options: jsonString(
-                    "DocumentPdfOptions를 JSON 직렬화한 문자열",
-                    '{"title":"Product guide","lang":"en","pageSize":"a4","orientation":"portrait","template":"document","includePageNumbers":true}',
-                  ),
+                  options: jsonString("DocumentPdfOptions", "/api/v1/docs-to-pdf"),
                 },
                 oneOf: [{ required: ["document"] }, { required: ["markdown"] }],
                 additionalProperties: false,
@@ -303,7 +338,7 @@ export const OPENAPI_DOCUMENT = {
         responses: {
           "200": {
             description: "태그가 포함된 PDF/UA-1",
-            headers: commonHeaders,
+            headers: successHeaders("/api/v1/docs-to-pdf"),
             content: { "application/pdf": { schema: { type: "string", format: "binary" } } },
           },
           ...protectedErrors,
@@ -320,6 +355,7 @@ export const OPENAPI_DOCUMENT = {
       },
     },
     schemas: {
+      ...OPTION_SCHEMAS,
       Health: {
         type: "object",
         properties: { status: { type: "string", const: "healthy" } },

@@ -271,7 +271,9 @@ export async function generateAssetRecipe(
     }
 
     if (options.recipe === "palette") {
-      const histogram = await runMagick([...MAGICK_LIMIT_ARGS, inputPath, "-auto-orient", ...colorArgs, "-alpha", "remove", "-resize", "128x128!", "-colors", String(options.colors), "-unique-colors", "-format", "%c", "histogram:info:-"], { temporaryDirectory, signal, stdoutLimit: 32 * 1024 });
+      // Q16 builds can report 12-digit RGB after quantization, even for an
+      // 8-bit upload. The palette's CSS/JSON contract uses 8-bit #rrggbb.
+      const histogram = await runMagick([...MAGICK_LIMIT_ARGS, inputPath, "-auto-orient", ...colorArgs, "-alpha", "remove", "-resize", "128x128!", "-colors", String(options.colors), "-unique-colors", "-depth", "8", "-format", "%c", "histogram:info:-"], { temporaryDirectory, signal, stdoutLimit: 32 * 1024 });
       const colors = parsePalette(histogram.stdout.toString(), options.colors);
       if (colors.length < 1) throw new Error("Palette extraction failed");
       const pairs = colors.flatMap((left, index) => colors.slice(index + 1).map((right) => {

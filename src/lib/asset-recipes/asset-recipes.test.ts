@@ -67,6 +67,20 @@ describe("asset recipe generation", () => {
     });
   });
 
+  it("extracts CSS colors when quantization produces 16-bit RGB values", async () => {
+    await withMagickTempDirectory(async (directory) => {
+      const image = await runMagick(["-size", "128x128", "xc:white", "-fill", "#ea580c", "-draw", "rectangle 16,16 111,111", "-fill", "#2563eb", "-draw", "circle 64,64 64,40", "-depth", "16", "png:-"], { temporaryDirectory: directory });
+      const pack = await generateAssetRecipe({ name: "high-depth.png", mime: "image/png", data: image.stdout }, { recipe: "palette", colors: 5, background: "#ffffff" }, directory);
+      const entry = pack.entries.find(({ name }) => name.endsWith("palette.json"));
+      expect(entry && "data" in entry).toBe(true);
+      const palette = JSON.parse((entry as { data: Buffer }).data.toString());
+      expect(palette.colors.length).toBeGreaterThan(0);
+      expect(palette.colors.every((color: string) => /^#[0-9a-f]{6}$/.test(color))).toBe(true);
+      expect(palette.colors).toContain("#ffffff");
+      expect(pack.previewPath).toContain("swatches.png");
+    });
+  });
+
   it.each<AssetRecipeOptions>([
     { recipe: "social", title: "Web asset release", subtitle: "Verified handoff", alt: "Warm-toned release preview", background: "#1a1712", textColor: "#ffffff" },
     { recipe: "background", color: "#ffffff", fuzz: 5 },

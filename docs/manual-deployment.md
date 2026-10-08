@@ -50,9 +50,13 @@ sudo systemctl reload nginx
 cd /opt/imgym
 git pull --ff-only
 docker compose up -d --build
-``` 배포가 끝나면 <https://dev.margins.cloud/imgym>을 열고 `/opt/imgym/.env`의 API 키를 입력합니다.
+```
+
+배포가 끝나면 <https://dev.margins.cloud/imgym>을 열고 `/opt/imgym/.env`의 API 키를 입력합니다.
 
 페이지는 외부에 공개되지만 모든 변환 요청에는 API 키가 필요합니다. 입력한 키는 브라우저의 `localStorage.ohmyimgapikey`에 저장됩니다.
+
+API 문서는 <https://dev.margins.cloud/imgym/api-docs>, OpenAPI는 <https://dev.margins.cloud/imgym/api/openapi>입니다. 이 도메인에 연결할 수 있는 다른 서버에서도 같은 키로 모든 변환과 미리보기 API를 호출합니다. [서버 연동 가이드](./api-guide.md)의 운영 검증 명령으로 전체 경로를 확인합니다.
 
 ## 자동 배포
 

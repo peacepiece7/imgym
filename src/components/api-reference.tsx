@@ -23,7 +23,6 @@ import {
   API_ENDPOINTS,
   API_REFERENCE_VERSION,
   API_TAGS,
-  INTERNAL_API_ROUTES,
   type ApiEndpointDoc,
   type ApiTag,
 } from "@/lib/api/docs";
@@ -270,11 +269,11 @@ export function ApiReference() {
                 이미지 파이프라인을<br className="hidden sm:block" /> 코드에서 호출하세요.
               </h1>
               <p className="mt-6 max-w-2xl text-sm leading-7 text-stone-400 sm:text-base">
-                실제 운영 라우트에서 외부 연동 가치가 있는 기능만 추렸습니다. 요청은 동기식이고, 업로드와 결과는 작업이 끝나면 서버에서 제거됩니다.
+                미리보기를 포함한 모든 변환 API를 서버에서 호출할 수 있습니다. 요청은 동기식이고, 업로드와 결과는 작업이 끝나면 서버에서 제거됩니다.
               </p>
             </div>
             <div className="grid grid-cols-3 divide-x divide-white/8 rounded-2xl border border-white/10 bg-[#181714]/80 p-1">
-              {[["8", "변환 API"], ["1", "상태 API"], ["v1", "안정 버전"]].map(([value, label]) => (
+              {[[String(API_ENDPOINTS.filter(({ method }) => method === "POST").length), "변환 API"], [String(API_ENDPOINTS.filter(({ method }) => method === "GET").length), "공개 API"], ["v1", "안정 버전"]].map(([value, label]) => (
                 <div key={label} className="px-3 py-4 text-center">
                   <div className="font-mono text-xl font-semibold text-orange-300">{value}</div>
                   <div className="mt-1 text-[10px] text-stone-500">{label}</div>
@@ -292,7 +291,7 @@ export function ApiReference() {
               </div>
               <div>
                 <h2 className="text-base font-semibold">하나의 Bearer 키로 인증합니다</h2>
-                <p className="mt-1.5 text-xs leading-6 text-stone-400">헬스 체크를 제외한 모든 API에 서버의 <code className="font-mono text-orange-200">OHMYIMG_API_KEY</code>와 같은 키를 보냅니다. URL이나 multipart 필드에는 키를 넣지 마세요.</p>
+                <p className="mt-1.5 text-xs leading-6 text-stone-400">모든 변환 API에 서버의 <code className="font-mono text-orange-200">OHMYIMG_API_KEY</code>와 같은 키를 보냅니다. 헬스 체크와 OpenAPI JSON은 인증 없이 읽을 수 있습니다.</p>
               </div>
             </div>
             <div className="mt-5 rounded-xl border border-white/10 bg-black/25 p-1.5">
@@ -334,7 +333,7 @@ export function ApiReference() {
                   </a>
                 ))}
                 <a href="#status-codes" className="mt-2 block rounded-md px-2 py-1.5 text-xs text-stone-400 transition hover:bg-white/5 hover:text-stone-100">상태 코드</a>
-                <a href="#internal-routes" className="block rounded-md px-2 py-1.5 text-xs text-stone-400 transition hover:bg-white/5 hover:text-stone-100">내부 전용 라우트</a>
+                <a href="#server-access" className="block rounded-md px-2 py-1.5 text-xs text-stone-400 transition hover:bg-white/5 hover:text-stone-100">외부 서버에서 호출</a>
               </nav>
             </div>
           </aside>
@@ -395,18 +394,13 @@ export function ApiReference() {
               <p className="mt-3 text-[11px] leading-5 text-stone-600">모든 변환 응답에는 <code className="font-mono">Cache-Control: no-store</code>와 <code className="font-mono">X-Request-Id</code>가 포함됩니다.</p>
             </section>
 
-            <section id="internal-routes" className="scroll-mt-24 border-t border-white/10 pt-12 mt-14">
+            <section id="server-access" className="scroll-mt-24 border-t border-white/10 pt-12 mt-14">
               <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-orange-300">04 / Boundary</div>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight">내부 UI 전용 라우트</h2>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight">외부 서버에서 호출</h2>
               <div className="mt-5 rounded-2xl border border-white/10 bg-[#181714]/85 p-5">
-                <p className="text-sm leading-7 text-stone-400">아래 미리보기 라우트는 브라우저 UI가 최종 ZIP 생성 전에 대표 결과를 보여주기 위해 사용합니다. 호출은 가능하지만 외부 연동용 안정 계약에는 포함하지 않습니다.</p>
-                <div className="mt-4 flex flex-col gap-2">
-                  {INTERNAL_API_ROUTES.map((route) => (
-                    <div key={route} className="flex items-center gap-3 rounded-lg border border-white/8 bg-black/20 px-3 py-2.5">
-                      <MethodBadge method="POST" compact />
-                      <code className="break-all font-mono text-xs text-stone-400">{route}</code>
-                    </div>
-                  ))}
+                <p className="text-sm leading-7 text-stone-400">dev.margins.cloud에 HTTPS로 연결할 수 있는 서버에서 동일한 Bearer 키로 모든 변환과 미리보기를 호출합니다. 서버 간 요청에는 CORS 설정이 필요하지 않습니다. 운영 도메인은 Tailnet에서 접근하므로 호출 서버도 해당 네트워크에 연결되어 있어야 합니다.</p>
+                <div className="mt-4">
+                  <CodeBlock code={`export BASE_URL='${baseUrl}'\n# OHMYIMG_API_KEY는 호출 서버의 환경 변수로 설정합니다.\ncurl --fail-with-body "$BASE_URL/api/health"\ncurl --fail-with-body \\\n  -H "Authorization: Bearer \${OHMYIMG_API_KEY}" \\\n  -F image=@icon.svg \\\n  "$BASE_URL/api/v1/optimize-svg"`} label="서버 연결 확인" />
                 </div>
               </div>
             </section>

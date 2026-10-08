@@ -40,7 +40,7 @@ The table names multipart fields, not JSON body properties. JSON-valued fields a
 | `optimize-svg` | one `image`, optional `precision` | 2 MiB, 50,000 elements | JSON direct-SVG result |
 | `docs-to-pdf` | exactly one `markdown` text or `document` file, optional `options` JSON | 1 MiB Markdown, 100 pages, 24 MiB PDF | PDF |
 
-For complete field schemas and curl examples, use [External API Access Design](../external-api-access-design.md). The route code remains authoritative.
+For field schemas, all recipe options and client examples, use [the API guide](../api-guide.md), [live API Reference](https://dev.margins.cloud/imgym/api-docs), and [OpenAPI JSON](https://dev.margins.cloud/imgym/api/openapi). Both preview APIs use the same Bearer key and are available to external servers. The route code remains authoritative.
 
 ## Web Asset Pack
 

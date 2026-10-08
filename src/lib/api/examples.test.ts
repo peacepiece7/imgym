@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import { API_ENDPOINTS } from "@/lib/api/docs";
 import { OPENAPI_DOCUMENT } from "@/lib/api/openapi";
 import { parseAssetRecipeOptions } from "@/lib/asset-recipes/options";
@@ -16,7 +17,9 @@ import { parseWebAssetOptions } from "@/lib/web-assets/options";
  */
 const PARSERS: Record<string, (value: string) => unknown> = {
   "/api/v1/web-assets": parseWebAssetOptions,
+  "/api/v1/web-assets/preview": parseWebAssetOptions,
   "/api/v1/asset-recipes": parseAssetRecipeOptions,
+  "/api/v1/asset-recipes/preview": parseAssetRecipeOptions,
   "/api/v1/media-recipes": parseMediaRecipeOptions,
   "/api/v1/optimize-raster": parseOptimizeRasterOptions,
   "/api/v1/vectorize": parseVectorCleanupOptions,
@@ -50,6 +53,29 @@ function openApiExamples(): Array<readonly [string, string]> {
 }
 
 describe("documented API examples", () => {
+  it.each(API_ENDPOINTS)("$path — copied curl expands to valid request arguments", (endpoint) => {
+    const base = "https://api.example.test/imgym";
+    // Stub curl so the actual copied shell text is exercised without uploads,
+    // network calls or the owner's key. Each argument is captured losslessly.
+    const output = execFileSync("sh", ["-c", `curl() { printf '%s\\000' "$@"; };\n${endpoint.curl}`], {
+      env: { BASE_URL: base, OHMYIMG_API_KEY: "documentation-test-key", PATH: process.env.PATH },
+      encoding: "utf8",
+    });
+    const args = output.split("\0").slice(0, -1);
+    expect(args.at(-1)).toBe(`${base}${endpoint.path}`);
+    for (let index = 0; index < args.length - 1; index += 1) {
+      const flag = args[index];
+      expect(["--fail-with-body", "-H", "-F", "-o"], `unexpected curl argument: ${flag}`).toContain(flag);
+      if (flag !== "--fail-with-body") {
+        const value = args[++index];
+        expect(value).toBeTruthy();
+        if (flag === "-H") expect(value).toBe("Authorization: Bearer documentation-test-key");
+        if (flag === "-F") expect(endpoint.fields.map(({ name }) => name)).toContain(value.split("=")[0]);
+      }
+    }
+    if (endpoint.method === "POST") expect(args).toContain("-H");
+  });
+
   it("covers every endpoint that takes a JSON options field", () => {
     const takesOptions = API_ENDPOINTS.filter((endpoint) =>
       endpoint.fields.some((field) => field.type === "JSON string" && field.required !== "선택"));

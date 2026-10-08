@@ -12,6 +12,7 @@
 
 ## 운영·사용 가이드
 
+- [API 서버 연동 가이드](./api-guide.md) — 전체 API·옵션 계약, curl/Node/Python, 운영 검증
 - [수동 배포](./manual-deployment.md)
 - [품질 보정](./quality-calibration-guide.md)
 - [외부 API 접근과 계약](./external-api-access-design.md)

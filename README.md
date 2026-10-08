@@ -5,6 +5,7 @@
 - 운영 주소: <https://dev.margins.cloud/imgym>
 - 기술 문서 시작점: [프로젝트 위키](./docs/wiki/home.md)
 - 배포 절차: [수동 배포 가이드](./docs/manual-deployment.md)
+- API 문서: [운영 API Reference](https://dev.margins.cloud/imgym/api-docs) · [OpenAPI JSON](https://dev.margins.cloud/imgym/api/openapi) · [서버 연동 가이드](./docs/api-guide.md)
 
 ## 제공 기능
 

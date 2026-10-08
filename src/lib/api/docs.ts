@@ -32,7 +32,7 @@ export interface ApiEndpointDoc {
 }
 
 export const API_BASE_PATH = "/imgym";
-export const API_REFERENCE_VERSION = "1.0.0";
+export const API_REFERENCE_VERSION = "1.1.0";
 export const API_TAGS: readonly ApiTag[] = ["System", "Inspect", "Build", "Optimize", "Convert"];
 
 const AUTH = '-H "Authorization: Bearer ${OHMYIMG_API_KEY}"';
@@ -53,6 +53,21 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
     limits: ["공개 호출", "변환 작업 슬롯을 사용하지 않음"],
     responseHeaders: ["Cache-Control: no-store"],
     curl: `curl --fail-with-body ${BASE}/api/health`,
+  },
+  {
+    id: "openapi",
+    method: "GET",
+    path: "/api/openapi",
+    tag: "System",
+    title: "OpenAPI 명세 다운로드",
+    summary: "모든 API의 요청·응답 계약을 OpenAPI 3.1 JSON으로 받습니다.",
+    description: "인증 없이 읽을 수 있으며 Postman 같은 API 클라이언트에 가져올 수 있습니다. 서버 키는 명세에 포함되지 않습니다.",
+    fields: [],
+    responseType: "application/json",
+    responseDescription: "OpenAPI 3.1 문서. servers의 URL에 paths의 경로를 붙여 호출합니다.",
+    limits: ["공개 호출", "캐시 최대 300초"],
+    responseHeaders: ["Cache-Control: public, max-age=300"],
+    curl: `curl --fail-with-body -o imgym-openapi.json ${BASE}/api/openapi`,
   },
   {
     id: "inspect-assets",
@@ -192,6 +207,44 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
 }` },
     ],
     curl: `curl --fail-with-body \\\n  ${AUTH} \\\n  -F asset=@product.png \\\n  -F 'options={"recipe":"icons","background":"#ffffff","padding":12,"includeNative":false}' \\\n  -o icons-asset-recipe.zip \\\n  ${BASE}/api/v1/asset-recipes`,
+  },
+  {
+    id: "web-assets-preview",
+    method: "POST",
+    path: "/api/v1/web-assets/preview",
+    tag: "Build",
+    title: "웹 에셋 미리보기",
+    summary: "웹 에셋 팩의 대표 이미지 한 장을 바이너리로 반환합니다.",
+    description: "web-assets와 같은 options를 사용하며 images는 정확히 한 파일만 보냅니다. 가장 큰 기본 포맷 산출물을 선택합니다. 미리보기 후 ZIP이 필요하면 web-assets를 별도로 호출합니다.",
+    fields: [
+      { name: "images", type: "file", required: "필수", description: "정적 PNG, JPEG 또는 WebP 한 장" },
+      { name: "options", type: "JSON string", required: "필수", description: "web-assets와 같은 설정" },
+    ],
+    responseType: "image/png · image/jpeg · image/webp",
+    responseDescription: "대표 이미지와 크기·품질 측정 헤더를 반환합니다. 생성 가능한 이미지가 없으면 422입니다.",
+    limits: ["파일 1개", "최대 10 MiB", "전체 팩 생성과 같은 처리 슬롯 사용"],
+    responseHeaders: ["X-Output-Bytes", "X-Output-Width", "X-Output-Height", "X-Output-Format", "X-Quality-Gate", "X-SSIM", "X-MAE", "X-Edge-MAE", "X-Alpha-MAE"],
+    examples: [{ label: "single · 한 장 미리보기", options: '{"profile":"single","targetSize":"mobile","crop":null,"sizes":"100vw","contentHint":"auto","colorPolicy":"preserve","altKind":"informative","altText":"제품 이미지","loading":"lazy","includeWebp":false,"includeAvif":false,"includePlaceholder":false}' }],
+    curl: `curl --fail-with-body \\\n  ${AUTH} \\\n  -F images=@hero.png \\\n  -F 'options={"profile":"single","targetSize":"mobile","crop":null,"sizes":"100vw","contentHint":"auto","colorPolicy":"preserve","altKind":"informative","altText":"Product image","loading":"lazy","includeWebp":false,"includeAvif":false,"includePlaceholder":false}' \\\n  -o web-preview.png \\\n  ${BASE}/api/v1/web-assets/preview`,
+  },
+  {
+    id: "asset-recipes-preview",
+    method: "POST",
+    path: "/api/v1/asset-recipes/preview",
+    tag: "Build",
+    title: "에셋 레시피 미리보기",
+    summary: "레시피의 대표 이미지를 ZIP 없이 바로 받습니다.",
+    description: "asset-recipes와 같은 asset과 options를 사용합니다. 각 레시피가 정한 대표 이미지를 반환하며, 전체 산출물이 필요하면 asset-recipes를 별도로 호출합니다.",
+    fields: [
+      { name: "asset", type: "file", required: "필수", description: "레시피에 맞는 이미지 또는 HEIC 파일" },
+      { name: "options", type: "JSON string", required: "필수", description: "asset-recipes와 같은 설정" },
+    ],
+    responseType: "image/png · image/jpeg · image/webp",
+    responseDescription: "대표 이미지와 출력 역할·크기 헤더를 반환합니다. 미리보기 생성에 실패하면 422입니다.",
+    limits: ["파일 1개", "최대 20 MiB", "frame · icons · palette · social · heic · background · watermark"],
+    responseHeaders: ["X-Output-Bytes", "X-Output-Width", "X-Output-Height", "X-Output-Role"],
+    examples: [{ label: "icons · 아이콘 미리보기", options: '{"recipe":"icons","background":"#ffffff","padding":12,"includeNative":false}' }],
+    curl: `curl --fail-with-body \\\n  ${AUTH} \\\n  -F asset=@product.png \\\n  -F 'options={"recipe":"icons","background":"#ffffff","padding":12,"includeNative":false}' \\\n  -o icon-preview.png \\\n  ${BASE}/api/v1/asset-recipes/preview`,
   },
   {
     id: "media-recipes",
@@ -356,9 +409,4 @@ export const API_ENDPOINTS: readonly ApiEndpointDoc[] = [
     ],
     curl: `curl --fail-with-body \\\n  ${AUTH} \\\n  -F document=@guide.md \\\n  -F 'options={"title":"Product guide","lang":"en","pageSize":"a4","orientation":"portrait","template":"document","includePageNumbers":true}' \\\n  -o guide.pdf \\\n  ${BASE}/api/v1/docs-to-pdf`,
   },
-] as const;
-
-export const INTERNAL_API_ROUTES = [
-  "/api/v1/web-assets/preview",
-  "/api/v1/asset-recipes/preview",
 ] as const;
