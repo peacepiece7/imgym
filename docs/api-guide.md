@@ -183,14 +183,21 @@ ZIP·PDF·이미지는 바이너리로 저장하고 vectorize/optimize-svg/inspe
 
 `scripts/verify-api.mjs`는 실제 HTTP를 통해 공개 엔드포인트, 모든 변환 경로의 누락·오류 키 401, 빈 입력 400, 공개 옵션 예시, 7개 레시피와 미리보기, GIF·폰트, 벡터 프리셋과 래스터 3포맷·4모드를 실행합니다. ZIP CRC·manifest의 SHA-256·크기와 바이너리 시그니처를 검사하고 결과 파일과 `report.json`을 출력합니다. 실패하면 0이 아닌 종료 코드로 끝납니다.
 
-배포 서버에서 Docker 런타임을 이용해 실행합니다. 키는 실행 중인 컨테이너의 환경에서 읽습니다.
+Linux 배포 서버에서 Docker 런타임과 호스트의 Tailnet 연결을 이용해 실행합니다. 기본 Docker 브리지의 내부 IP로 운영 Nginx에 요청하면 403이므로 `--network host`가 필요합니다. 키는 서버의 `.env`에서 읽고, 결과는 호스트의 임시 폴더에 남깁니다.
 
 ```sh
 cd /opt/imgym
-docker compose exec -T \
+verification_dir="$(mktemp -d /tmp/imgym-api-verification.XXXXXX)"
+docker run --rm -i --network host \
+  --user "$(id -u):$(id -g)" \
+  --env-file .env \
   -e API_BASE_URL=https://dev.margins.cloud/imgym \
-  app node --input-type=module < scripts/verify-api.mjs
+  -e API_VERIFY_OUTPUT=/results \
+  --mount "type=bind,src=$verification_dir,dst=/results" \
+  imgym:local node --input-type=module < scripts/verify-api.mjs
 ```
+
+`report.json`과 변환 파일은 `$verification_dir`에 저장됩니다.
 
 다른 서버에서도 같은 스크립트를 실행할 수 있습니다. Node.js 24, ImageMagick(HEIC 포함), FontTools, Python 3과 수정 가능한 Noto 글꼴을 준비합니다. `.env`에 API 키를 설정한 저장소에서는 다음을 실행합니다.
 
@@ -199,3 +206,7 @@ API_VERIFY_FONT=/path/to/NotoSansCJK-Regular.ttc pnpm verify:api
 ```
 
 이미 준비한 `source.png`, `source.jpg`, `source.webp`, `source.heic`, `motion.gif`, `font.otf`, `icon.svg`가 있는 폴더는 `API_VERIFY_FIXTURES`로 지정하면 ImageMagick·FontTools 없이도 호출을 검증할 수 있습니다. ZIP 검증에는 Python 3이 필요합니다. `API_VERIFY_OUTPUT`으로 결과 폴더를 지정하고 `API_BASE_URL`로 다른 배포를 선택합니다. API 키는 보고서에 기록하지 않습니다.
+
+## 검증 기록
+
+2026-10-08 운영 API 문서 v1.1.0을 외부 macOS 머신과 Linux 배포 서버의 Docker 호스트 네트워크에서 각각 검증했습니다. 두 환경 모두 변환 API 10개·성공 시나리오 42개·인증 거부 20건·빈 입력 거부 10건을 통과했습니다. 운영 Docker 빌드의 테스트 242개와 프로덕션 빌드도 통과했습니다. 이 검증에서 발견한 팔레트의 16비트 색상 파싱 오류를 수정했고, 한글 PDF 텍스트 추출과 문서 화면·검색·펼치기도 확인했습니다.
